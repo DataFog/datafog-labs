@@ -37,7 +37,7 @@ def _detect_columns(dataset: Dataset) -> tuple[str, str]:
     cols = dataset.column_names
 
     # Common token column names
-    for name in ["tokens", "words", "token", "word"]:
+    for name in ["tokens", "words", "token", "word", "mbert_text_tokens"]:
         if name in cols:
             token_col = name
             break
@@ -45,7 +45,7 @@ def _detect_columns(dataset: Dataset) -> tuple[str, str]:
         raise ValueError(f"Cannot find token column in {cols}")
 
     # Common tag column names
-    for name in ["ner_tags", "tags", "labels", "ner_labels", "entities"]:
+    for name in ["ner_tags", "tags", "labels", "ner_labels", "entities", "mbert_bio_labels"]:
         if name in cols:
             tag_col = name
             break
@@ -180,7 +180,12 @@ def load_single_dataset(
     config = DATASET_CONFIGS[dataset_name]
     logger.info(f"Loading {dataset_name} from {config['path']}...")
 
-    raw = load_dataset(config["path"], split=config["split"], trust_remote_code=True)
+    raw = load_dataset(config["path"], split=config["split"])
+
+    # Filter to English if language column exists
+    if "language" in raw.column_names:
+        raw = raw.filter(lambda x: x["language"] == "en", desc="Filtering to English")
+        logger.info(f"  Filtered to {len(raw)} English examples")
 
     if max_examples is not None:
         raw = raw.select(range(min(max_examples, len(raw))))
