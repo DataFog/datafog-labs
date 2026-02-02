@@ -1,0 +1,27 @@
+model:
+  backbone: microsoft/deberta-v3-xsmall
+  char_embed_dim: 50
+  char_vocab_size: 256
+  char_cnn_filters: [50, 50, 50]
+  char_cnn_widths: [3, 4, 5]
+  max_char_len: 20
+  dropout: 0.1
+
+data:
+  max_seq_len: 256
+  train_split: 0.8
+  val_split: 0.1
+  test_split: 0.1
+
+training:
+  epochs: 10
+  batch_size: 32
+  lr_backbone: 2.0e-5
+  lr_head: 1.0e-3
+  warmup_ratio: 0.1
+  weight_decay: 0.01
+  fp16: true
+  eval_strategy: epoch
+  save_strategy: epoch
+  metric_for_best_model: overall_f1
+  output_dir: outputs

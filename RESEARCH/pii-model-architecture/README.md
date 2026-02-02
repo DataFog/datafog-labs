@@ -31,7 +31,7 @@ This research program investigates the optimal architecture for a PII-specific d
 | [`08_report/06_gliner2_comparison.md`](./08_report/06_gliner2_comparison.md) | Head-to-head comparison: GLiNER2 (205M) vs DataFog PII-NER v1 (22.7M) |
 
 ### Visual Guide
-- [`architecture-guide.html`](./architecture-guide.html) -- Interactive 29-slide visual presentation (open in browser) |
+- [`architecture-guide.html`](./architecture-guide.html) -- Interactive 29-slide visual presentation covering ML fundamentals, architecture comparisons, and the design recommendation. Clone the repo and open in a browser to navigate with arrow keys.
 
 ## Key Findings
 
