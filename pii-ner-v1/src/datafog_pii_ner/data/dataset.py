@@ -192,11 +192,13 @@ def load_single_dataset(
 
     token_col, tag_col = _detect_columns(raw)
 
-    # Check if tags are ClassLabel integers (need tag_names for conversion)
+    # Check if tags are ClassLabel integers (need tag_names for conversion).
+    # HF datasets' List type has a broken __getattr__ so we use bare try/except.
     tag_names = None
-    inner = getattr(raw.features[tag_col], "feature", None)
-    if inner is not None and hasattr(inner, "names"):
-        tag_names = inner.names
+    try:
+        tag_names = raw.features[tag_col].feature.names
+    except Exception:
+        pass
 
     def preprocess(example):
         tokens = example[token_col]
