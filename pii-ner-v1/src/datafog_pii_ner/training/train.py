@@ -29,16 +29,18 @@ class PiiTrainer(Trainer):
         return (loss, outputs) if return_outputs else loss
 
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
+        import torch
+
         inputs = self._prepare_inputs(inputs)
-        with self.compute_loss_context_manager():
+        with torch.no_grad():
             outputs = model(**inputs)
 
-        loss = outputs.loss
+        loss = outputs.loss.detach() if outputs.loss is not None else None
         if prediction_loss_only:
             return (loss, None, None)
 
-        predictions = outputs.predictions
-        labels = inputs.get("labels")
+        predictions = outputs.predictions.detach()
+        labels = inputs.get("labels").detach()
 
         return (loss, predictions, labels)
 
