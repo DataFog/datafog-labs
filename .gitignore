@@ -39,6 +39,9 @@ data/processed/
 # Jupyter
 .ipynb_checkpoints/
 
+# Papers
+gliner2-paper.pdf
+
 # Secrets
 .env
 *.key
