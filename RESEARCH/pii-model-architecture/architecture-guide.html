@@ -1,0 +1,2103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DataFog PII Model — Architecture Decision Guide</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+  :root {
+    --bg: #0f0f13;
+    --card: #1a1a24;
+    --card-border: #2a2a3a;
+    --text: #e8e8f0;
+    --text-dim: #8888a0;
+    --accent: #6366f1;
+    --accent-light: #818cf8;
+    --green: #34d399;
+    --orange: #fb923c;
+    --red: #f87171;
+    --cyan: #22d3ee;
+    --pink: #f472b6;
+    --yellow: #fbbf24;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  /* Progress Bar */
+  .progress-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--cyan));
+    transition: width 0.4s ease;
+    z-index: 100;
+  }
+
+  /* Slide Counter */
+  .slide-counter {
+    position: fixed;
+    top: 16px;
+    right: 24px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--text-dim);
+    z-index: 100;
+  }
+
+  /* Section Label */
+  .section-label {
+    position: fixed;
+    top: 16px;
+    left: 24px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent-light);
+    z-index: 100;
+  }
+
+  /* Navigation */
+  .nav-hint {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--text-dim);
+    z-index: 100;
+  }
+  .nav-hint kbd {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+  }
+
+  /* Arrow buttons */
+  .nav-arrows {
+    position: fixed;
+    bottom: 20px;
+    right: 24px;
+    display: flex;
+    gap: 8px;
+    z-index: 100;
+  }
+  .nav-arrows button {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    border: 1px solid var(--card-border);
+    background: var(--card);
+    color: var(--text);
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+  }
+  .nav-arrows button:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  /* Slide Container */
+  .slides-wrapper {
+    height: 100vh;
+    width: 100vw;
+    position: relative;
+  }
+
+  .slide {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 80px;
+    opacity: 0;
+    transform: translateX(60px);
+    transition: opacity 0.45s ease, transform 0.45s ease;
+    pointer-events: none;
+  }
+  .slide.active {
+    opacity: 1;
+    transform: translateX(0);
+    pointer-events: all;
+  }
+  .slide.exit-left {
+    opacity: 0;
+    transform: translateX(-60px);
+  }
+
+  .slide-content {
+    max-width: 1100px;
+    width: 100%;
+  }
+
+  /* Typography */
+  h1 {
+    font-size: 52px;
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -1px;
+    margin-bottom: 16px;
+  }
+  h2 {
+    font-size: 36px;
+    font-weight: 700;
+    line-height: 1.2;
+    margin-bottom: 12px;
+  }
+  h3 {
+    font-size: 22px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .subtitle {
+    font-size: 20px;
+    color: var(--text-dim);
+    font-weight: 400;
+    line-height: 1.5;
+    max-width: 700px;
+  }
+  .big-number {
+    font-size: 72px;
+    font-weight: 900;
+    background: linear-gradient(135deg, var(--accent-light), var(--cyan));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    line-height: 1;
+  }
+
+  /* Accent text */
+  .accent { color: var(--accent-light); }
+  .green { color: var(--green); }
+  .orange { color: var(--orange); }
+  .red { color: var(--red); }
+  .cyan { color: var(--cyan); }
+  .pink { color: var(--pink); }
+  .yellow { color: var(--yellow); }
+  .dim { color: var(--text-dim); }
+
+  /* Cards */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 24px;
+  }
+  .card-grid {
+    display: grid;
+    gap: 16px;
+  }
+  .card-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  .card-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .card-grid.cols-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+
+  .card-icon {
+    font-size: 32px;
+    margin-bottom: 12px;
+    display: block;
+  }
+  .card h3 { margin-bottom: 8px; }
+  .card p {
+    font-size: 14px;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+
+  /* Tags */
+  .tag {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+  .tag-accent { background: rgba(99,102,241,0.2); color: var(--accent-light); }
+  .tag-green { background: rgba(52,211,153,0.2); color: var(--green); }
+  .tag-orange { background: rgba(251,146,60,0.2); color: var(--orange); }
+  .tag-red { background: rgba(248,113,113,0.2); color: var(--red); }
+  .tag-cyan { background: rgba(34,211,238,0.2); color: var(--cyan); }
+
+  /* Bar charts */
+  .bar-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 16px;
+  }
+  .bar-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .bar-label {
+    width: 180px;
+    font-size: 14px;
+    font-weight: 500;
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .bar-track {
+    flex: 1;
+    height: 32px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 6px;
+    overflow: hidden;
+    position: relative;
+  }
+  .bar-fill {
+    height: 100%;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    padding-left: 12px;
+    font-size: 13px;
+    font-weight: 600;
+    transition: width 0.8s ease;
+  }
+  .bar-fill.purple { background: linear-gradient(90deg, var(--accent), var(--accent-light)); }
+  .bar-fill.green { background: linear-gradient(90deg, #059669, var(--green)); }
+  .bar-fill.orange { background: linear-gradient(90deg, #d97706, var(--orange)); }
+  .bar-fill.red { background: linear-gradient(90deg, #dc2626, var(--red)); }
+  .bar-fill.cyan { background: linear-gradient(90deg, #0891b2, var(--cyan)); }
+
+  /* Diagram styles */
+  .diagram {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    padding: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .flow-diagram {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .flow-box {
+    padding: 12px 24px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: center;
+    min-width: 260px;
+    border: 2px solid;
+  }
+  .flow-arrow {
+    font-size: 20px;
+    color: var(--text-dim);
+    line-height: 1;
+  }
+
+  /* Highlight text */
+  .highlight-text {
+    background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(34,211,238,0.1));
+    border-left: 3px solid var(--accent);
+    padding: 16px 20px;
+    border-radius: 0 8px 8px 0;
+    font-size: 16px;
+    line-height: 1.6;
+    margin: 16px 0;
+  }
+
+  /* Comparison table */
+  .compare-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 14px;
+  }
+  .compare-table th {
+    background: rgba(99,102,241,0.15);
+    padding: 10px 16px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--accent-light);
+  }
+  .compare-table th:first-child { border-radius: 8px 0 0 0; }
+  .compare-table th:last-child { border-radius: 0 8px 0 0; }
+  .compare-table td {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--card-border);
+  }
+  .compare-table tr:last-child td { border-bottom: none; }
+  .compare-table tr.highlight-row td {
+    background: rgba(99,102,241,0.08);
+    font-weight: 600;
+  }
+
+  /* SVG styles */
+  .arch-svg text {
+    font-family: 'Inter', sans-serif;
+  }
+
+  /* Analogy box */
+  .analogy {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    background: rgba(251,191,36,0.08);
+    border: 1px solid rgba(251,191,36,0.2);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin: 12px 0;
+  }
+  .analogy-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .analogy-text {
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--yellow);
+  }
+
+  /* Two column layout */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+    align-items: start;
+  }
+
+  /* Lists */
+  .check-list {
+    list-style: none;
+    padding: 0;
+  }
+  .check-list li {
+    padding: 6px 0;
+    font-size: 15px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    line-height: 1.5;
+  }
+  .check-list li::before {
+    content: '✓';
+    color: var(--green);
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  /* Pill */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    margin: 4px;
+  }
+
+  /* PII example */
+  .pii-example {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 16px;
+    padding: 16px 24px;
+    background: rgba(0,0,0,0.3);
+    border-radius: 8px;
+    line-height: 2;
+    margin: 12px 0;
+  }
+  .pii-example .hl-name { background: rgba(99,102,241,0.3); padding: 2px 6px; border-radius: 4px; }
+  .pii-example .hl-ssn { background: rgba(248,113,113,0.3); padding: 2px 6px; border-radius: 4px; }
+  .pii-example .hl-email { background: rgba(34,211,238,0.3); padding: 2px 6px; border-radius: 4px; }
+  .pii-example .hl-addr { background: rgba(52,211,153,0.3); padding: 2px 6px; border-radius: 4px; }
+
+  .legend {
+    display: flex;
+    gap: 16px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+  }
+  .legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+  }
+
+  /* Sticky note style */
+  .key-insight {
+    background: linear-gradient(135deg, rgba(99,102,241,0.12), rgba(99,102,241,0.05));
+    border: 1px solid rgba(99,102,241,0.3);
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin: 16px 0;
+  }
+  .key-insight .label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent-light);
+    margin-bottom: 8px;
+  }
+  .key-insight .text {
+    font-size: 18px;
+    font-weight: 500;
+    line-height: 1.5;
+  }
+
+  /* Section divider slide */
+  .section-divider {
+    text-align: center;
+  }
+  .section-divider .section-num {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--accent-light);
+    margin-bottom: 16px;
+  }
+  .section-divider h1 {
+    font-size: 48px;
+    background: linear-gradient(135deg, var(--text), var(--accent-light));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .section-divider .section-desc {
+    font-size: 18px;
+    color: var(--text-dim);
+    margin-top: 12px;
+    max-width: 500px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* Gate visualization */
+  .gate-viz {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    padding: 24px;
+  }
+  .gate-input {
+    text-align: center;
+    padding: 16px 24px;
+    border-radius: 10px;
+    border: 2px solid;
+    font-size: 14px;
+    font-weight: 600;
+    min-width: 140px;
+  }
+  .gate-merge {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .gate-arrow {
+    font-size: 24px;
+    color: var(--text-dim);
+  }
+
+  /* Tier badges */
+  .tier-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .tier-card {
+    border-radius: 10px;
+    padding: 16px 20px;
+    border: 1px solid;
+  }
+  .tier-card h4 {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .tier-card .examples {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+  .tier-card .target {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    margin-top: 6px;
+  }
+
+  /* TOC */
+  .toc {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .toc-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .toc-item:hover {
+    border-color: var(--accent);
+    background: rgba(99,102,241,0.08);
+  }
+  .toc-num {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .toc-text {
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .slide { padding: 60px 32px; }
+    h1 { font-size: 36px; }
+    h2 { font-size: 28px; }
+    .two-col, .card-grid.cols-2, .card-grid.cols-3, .card-grid.cols-4 {
+      grid-template-columns: 1fr;
+    }
+    .big-number { font-size: 48px; }
+    .bar-label { width: 120px; font-size: 12px; }
+    .toc { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="progress-bar" id="progressBar"></div>
+<div class="section-label" id="sectionLabel"></div>
+<div class="slide-counter" id="slideCounter"></div>
+<div class="nav-hint">
+  <kbd>←</kbd> <kbd>→</kbd> or click arrows to navigate
+</div>
+<div class="nav-arrows">
+  <button onclick="prevSlide()" id="prevBtn">&#8592;</button>
+  <button onclick="nextSlide()" id="nextBtn">&#8594;</button>
+</div>
+
+<div class="slides-wrapper" id="slidesWrapper">
+
+<!-- ==================== SLIDE 0: TITLE ==================== -->
+<div class="slide" data-section="">
+  <div class="slide-content" style="text-align:center;">
+    <div style="font-size:14px; font-weight:600; letter-spacing:3px; text-transform:uppercase; color:var(--accent-light); margin-bottom:20px;">DataFog Research</div>
+    <h1 style="font-size:56px; margin-bottom:20px;">PII Detection Model<br><span class="accent">Architecture Guide</span></h1>
+    <p class="subtitle" style="max-width:600px; margin:0 auto 32px;">A visual, jargon-free walkthrough of the ML concepts and research findings you need to make an informed architecture decision.</p>
+    <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
+      <span class="pill"><span class="green">●</span> 29 slides</span>
+      <span class="pill"><span class="cyan">●</span> ~15 min read</span>
+      <span class="pill"><span class="accent">●</span> No ML expertise needed</span>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 1: TABLE OF CONTENTS ==================== -->
+<div class="slide" data-section="">
+  <div class="slide-content">
+    <h2 style="margin-bottom:24px;">What We'll Cover</h2>
+    <div class="toc">
+      <div class="toc-item" onclick="goToSlide(2)">
+        <div class="toc-num">1</div>
+        <div class="toc-text">What is PII Detection?</div>
+      </div>
+      <div class="toc-item" onclick="goToSlide(5)">
+        <div class="toc-num">2</div>
+        <div class="toc-text">ML Building Blocks</div>
+      </div>
+      <div class="toc-item" onclick="goToSlide(11)">
+        <div class="toc-num">3</div>
+        <div class="toc-text">Current Solutions & Problems</div>
+      </div>
+      <div class="toc-item" onclick="goToSlide(13)">
+        <div class="toc-num">3b</div>
+        <div class="toc-text">GLiNER2 vs DataFog v1</div>
+      </div>
+      <div class="toc-item" onclick="goToSlide(18)">
+        <div class="toc-num">4</div>
+        <div class="toc-text">Our Architecture (Deep Dive)</div>
+      </div>
+      <div class="toc-item" onclick="goToSlide(25)">
+        <div class="toc-num">5</div>
+        <div class="toc-text">Training Data & Evaluation</div>
+      </div>
+      <div class="toc-item" onclick="goToSlide(27)">
+        <div class="toc-num">6</div>
+        <div class="toc-text">The Decision</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 2: SECTION — PII ==================== -->
+<div class="slide" data-section="PII DETECTION">
+  <div class="slide-content section-divider">
+    <div class="section-num">Part 1</div>
+    <h1>What is PII Detection?</h1>
+    <p class="section-desc">The problem we're solving and why it matters</p>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 3: WHAT IS NER / PII ==================== -->
+<div class="slide" data-section="PII DETECTION">
+  <div class="slide-content">
+    <h2>Finding Sensitive Info in Text</h2>
+    <p class="subtitle" style="margin-bottom:20px;">PII detection is about scanning text and highlighting every piece of personally identifiable information.</p>
+
+    <div class="pii-example">
+      My name is <span class="hl-name">John Smith</span> and my SSN is <span class="hl-ssn">123-45-6789</span>.<br>
+      Email me at <span class="hl-email">john@example.com</span> or visit me at<br>
+      <span class="hl-addr">742 Evergreen Terrace, Springfield IL</span>.
+    </div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:rgba(99,102,241,0.5)"></div> Name</div>
+      <div class="legend-item"><div class="legend-dot" style="background:rgba(248,113,113,0.5)"></div> SSN</div>
+      <div class="legend-item"><div class="legend-dot" style="background:rgba(34,211,238,0.5)"></div> Email</div>
+      <div class="legend-item"><div class="legend-dot" style="background:rgba(52,211,153,0.5)"></div> Address</div>
+    </div>
+
+    <div class="analogy">
+      <div class="analogy-icon">💡</div>
+      <div class="analogy-text">Think of it like a highlighter that automatically marks every sensitive detail in a document — names, IDs, emails, addresses — so you can redact or protect them.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 4: TWO KINDS OF PII ==================== -->
+<div class="slide" data-section="PII DETECTION">
+  <div class="slide-content">
+    <h2>The Two Natures of PII</h2>
+    <p class="subtitle" style="margin-bottom:24px;">This is the <strong>key insight</strong> driving our architecture. PII comes in two flavors:</p>
+
+    <div class="card-grid cols-2">
+      <div class="card" style="border-color: var(--cyan);">
+        <div class="card-icon">🔢</div>
+        <h3 class="cyan">Structured PII</h3>
+        <p style="margin-bottom:12px;">Has a <strong>predictable format</strong> — you can spot it by its shape, not its meaning.</p>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:13px; line-height:2; color:var(--text);">
+          SSN: <span class="cyan">XXX-XX-XXXX</span><br>
+          Credit Card: <span class="cyan">XXXX-XXXX-XXXX-XXXX</span><br>
+          Email: <span class="cyan">word@word.word</span><br>
+          Phone: <span class="cyan">(XXX) XXX-XXXX</span><br>
+          IP Address: <span class="cyan">XXX.XXX.XXX.XXX</span>
+        </div>
+      </div>
+      <div class="card" style="border-color: var(--pink);">
+        <div class="card-icon">🧠</div>
+        <h3 class="pink">Soft PII</h3>
+        <p style="margin-bottom:12px;">Requires <strong>understanding context</strong> — looks like normal words until you read around them.</p>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:13px; line-height:2; color:var(--text);">
+          Name: <span class="pink">Jordan Lee</span><br>
+          Address: <span class="pink">742 Elm Street</span><br>
+          Employer: <span class="pink">Acme Corp</span><br>
+          Medical condition: <span class="pink">diabetes</span><br>
+          Political affiliation: <span class="pink">Independent</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="key-insight">
+      <div class="label">Key Insight</div>
+      <div class="text">Most models only do one well. We need a model that handles <strong>both</strong> — pattern matching for structured PII, and language understanding for soft PII.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 5: SECTION — ML BASICS ==================== -->
+<div class="slide" data-section="ML BASICS">
+  <div class="slide-content section-divider">
+    <div class="section-num">Part 2</div>
+    <h1>ML Building Blocks</h1>
+    <p class="section-desc">The concepts you need — explained simply</p>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 6: TOKENS ==================== -->
+<div class="slide" data-section="ML BASICS">
+  <div class="slide-content">
+    <h2>Step 1: Tokens</h2>
+    <p class="subtitle" style="margin-bottom:20px;">Before a model can read text, it must be broken into small pieces called <strong>tokens</strong>.</p>
+
+    <div class="card" style="margin-bottom:16px;">
+      <h3 style="margin-bottom:12px;">Tokenization in Action</h3>
+      <div style="font-family:'JetBrains Mono',monospace; font-size:15px; margin-bottom:12px;">
+        <span class="dim">Input:</span> "John's SSN is 123-45-6789"
+      </div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px;">
+        <span class="pill" style="background:rgba(99,102,241,0.2); border-color:var(--accent);">John</span>
+        <span class="pill" style="background:rgba(99,102,241,0.2); border-color:var(--accent);">'s</span>
+        <span class="pill" style="background:rgba(99,102,241,0.2); border-color:var(--accent);">SS</span>
+        <span class="pill" style="background:rgba(99,102,241,0.2); border-color:var(--accent);">##N</span>
+        <span class="pill" style="background:rgba(99,102,241,0.2); border-color:var(--accent);">is</span>
+        <span class="pill" style="background:rgba(99,102,241,0.2); border-color:var(--accent);">123</span>
+        <span class="pill" style="background:rgba(99,102,241,0.2); border-color:var(--accent);">-</span>
+        <span class="pill" style="background:rgba(99,102,241,0.2); border-color:var(--accent);">45</span>
+        <span class="pill" style="background:rgba(99,102,241,0.2); border-color:var(--accent);">-</span>
+        <span class="pill" style="background:rgba(99,102,241,0.2); border-color:var(--accent);">67</span>
+        <span class="pill" style="background:rgba(99,102,241,0.2); border-color:var(--accent);">##89</span>
+      </div>
+      <p style="font-size:13px; color:var(--text-dim);">Notice: "SSN" becomes two tokens ("SS" + "##N"). The model doesn't see whole words — it sees subword pieces.</p>
+    </div>
+
+    <div class="analogy">
+      <div class="analogy-icon">💡</div>
+      <div class="analogy-text">Tokens are like Scrabble tiles. Instead of reading whole words, the model reads letter groups. It has a fixed vocabulary of ~50,000 common pieces it knows. Rare words get split into smaller known pieces.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 7: EMBEDDINGS ==================== -->
+<div class="slide" data-section="ML BASICS">
+  <div class="slide-content">
+    <h2>Step 2: Embeddings</h2>
+    <p class="subtitle" style="margin-bottom:20px;">Each token gets converted into a list of numbers that captures its meaning.</p>
+
+    <div class="two-col">
+      <div>
+        <div class="card" style="margin-bottom:16px;">
+          <h3>What's an embedding?</h3>
+          <p style="margin-top:8px;">A list of numbers (called a <strong>vector</strong>) that represents a word's meaning. Similar words get similar numbers.</p>
+          <div style="margin-top:16px; font-family:'JetBrains Mono',monospace; font-size:13px; line-height:2;">
+            <span class="accent">"king"</span>  → [0.21, -0.45, 0.89, ...]<br>
+            <span class="accent">"queen"</span> → [0.19, -0.42, 0.91, ...]<br>
+            <span class="accent">"table"</span> → [-0.71, 0.33, -0.15, ...]
+          </div>
+          <p style="margin-top:12px; font-size:13px; color:var(--text-dim);">"king" and "queen" have similar numbers because they're related concepts. "table" is very different.</p>
+        </div>
+      </div>
+      <div>
+        <div class="card" style="background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(34,211,238,0.05));">
+          <h3>In our model</h3>
+          <p style="margin-top:8px;">Each token becomes a vector of <strong>384 numbers</strong>. That's the model's "hidden size."</p>
+          <div style="margin-top:16px;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+              <span class="pill" style="background:var(--accent); border:none; color:white;">John</span>
+              <span class="dim">→</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-dim);">[384 numbers]</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+              <span class="pill" style="background:var(--accent); border:none; color:white;">SSN</span>
+              <span class="dim">→</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-dim);">[384 numbers]</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="pill" style="background:var(--accent); border:none; color:white;">123</span>
+              <span class="dim">→</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-dim);">[384 numbers]</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="analogy">
+      <div class="analogy-icon">💡</div>
+      <div class="analogy-text">Think of embeddings as GPS coordinates for words. Words that mean similar things are located near each other on a "meaning map." The model navigates this map to understand language.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 8: ATTENTION ==================== -->
+<div class="slide" data-section="ML BASICS">
+  <div class="slide-content">
+    <h2>Step 3: Attention</h2>
+    <p class="subtitle" style="margin-bottom:20px;">The core breakthrough that makes modern AI work. It lets the model figure out <strong>which words to focus on</strong> when understanding each word.</p>
+
+    <div class="card" style="margin-bottom:16px;">
+      <h3 style="margin-bottom:12px;">How attention works</h3>
+      <div style="font-family:'JetBrains Mono',monospace; font-size:15px; margin-bottom:16px;">
+        "The <strong style="color:var(--accent-light)">bank</strong> of the <strong style="color:var(--green)">river</strong> was muddy"
+      </div>
+      <p style="font-size:14px; color:var(--text-dim); line-height:1.6;">
+        When processing "bank", attention looks at other words. It sees "river" and concludes bank = riverbank, not financial bank. Each word "pays attention" to the words that help explain it.
+      </p>
+    </div>
+
+    <div class="two-col">
+      <div class="card">
+        <h3>Attention Heads</h3>
+        <p style="margin-top:8px;">One "head" is one perspective. Our model has <strong>6 heads</strong> running in parallel — each learns to focus on different relationships:</p>
+        <div style="margin-top:12px; font-size:13px; line-height:2;">
+          <span class="tag tag-accent">Head 1</span> grammar relationships<br>
+          <span class="tag tag-green">Head 2</span> nearby words<br>
+          <span class="tag tag-cyan">Head 3</span> semantic meaning<br>
+          <span class="tag tag-orange">Head 4</span> punctuation patterns<br>
+          <span style="color:var(--text-dim);">... and so on</span>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Layers (Depth)</h3>
+        <p style="margin-top:8px;">Our model has <strong>12 layers</strong> stacked. Each layer refines the understanding:</p>
+        <div style="margin-top:12px; font-size:13px; line-height:2;">
+          <span class="dim">Layers 1-4:</span> basic syntax, word forms<br>
+          <span class="dim">Layers 5-8:</span> phrases, relationships<br>
+          <span class="dim">Layers 9-12:</span> high-level meaning, entities
+        </div>
+        <p style="margin-top:12px; font-size:13px; color:var(--text-dim);">More layers = deeper understanding, but also slower. 12 is the sweet spot for our size.</p>
+      </div>
+    </div>
+
+    <div class="analogy">
+      <div class="analogy-icon">💡</div>
+      <div class="analogy-text">Attention is like having 6 team members each reading the same sentence, but each focusing on different clues. Then they compare notes to build a complete understanding.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 9: ENCODER ==================== -->
+<div class="slide" data-section="ML BASICS">
+  <div class="slide-content">
+    <h2>Step 4: The Encoder</h2>
+    <p class="subtitle" style="margin-bottom:20px;">An encoder is the full reading comprehension machine. It takes tokens in, applies attention across many layers, and produces a deep understanding of each token.</p>
+
+    <div class="diagram" style="margin-bottom:20px;">
+      <div class="flow-diagram">
+        <div class="flow-box" style="border-color:var(--text-dim); background:rgba(255,255,255,0.03);">
+          Raw Text: "My SSN is 123-45-6789"
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-box" style="border-color:var(--accent); background:rgba(99,102,241,0.1);">
+          Tokenizer → [My] [SS] [##N] [is] [123] [-] [45] [-] [67] [##89]
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-box" style="border-color:var(--cyan); background:rgba(34,211,238,0.1);">
+          Embeddings → 384 numbers per token
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-box" style="border-color:var(--pink); background:rgba(244,114,182,0.1);">
+          12 Attention Layers (6 heads each)
+        </div>
+        <div class="flow-arrow">↓</div>
+        <div class="flow-box" style="border-color:var(--green); background:rgba(52,211,153,0.1);">
+          Output: 384 numbers per token (now context-aware)
+        </div>
+      </div>
+    </div>
+
+    <div class="key-insight">
+      <div class="label">The key difference</div>
+      <div class="text">Input embeddings are <em>static</em> — "bank" always looks the same. Output embeddings are <em>contextual</em> — "bank" near "river" looks different from "bank" near "money". The encoder adds understanding.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 10: DEBERTA ==================== -->
+<div class="slide" data-section="ML BASICS">
+  <div class="slide-content">
+    <h2>DeBERTa: Our Chosen Encoder</h2>
+    <p class="subtitle" style="margin-bottom:20px;">Not all encoders are equal. DeBERTa-v3-xsmall is the one we're using. Here's why.</p>
+
+    <div class="two-col">
+      <div>
+        <h3 style="margin-bottom:16px;">What makes DeBERTa special?</h3>
+        <div class="card" style="margin-bottom:12px;">
+          <h3 class="accent">Disentangled Attention</h3>
+          <p style="margin-top:6px;">Regular models mix "what a word means" with "where it is in the sentence" into one signal. DeBERTa keeps them <strong>separate</strong>, then combines them. This means it can learn that position matters differently for different words.</p>
+        </div>
+        <div class="card">
+          <h3 class="green">Smarter Pretraining (RTD)</h3>
+          <p style="margin-top:6px;">Instead of guessing missing words (like BERT), DeBERTa plays "spot the fake word" — detecting which words in a sentence have been swapped. This is harder and creates a better learner.</p>
+        </div>
+      </div>
+      <div>
+        <h3 style="margin-bottom:16px;">Why the "xsmall" version?</h3>
+        <table class="compare-table">
+          <tr>
+            <th>Model</th>
+            <th>Params</th>
+            <th>NER Score</th>
+          </tr>
+          <tr>
+            <td>DeBERTa-v3-large</td>
+            <td>304M</td>
+            <td>93.5 F1</td>
+          </tr>
+          <tr>
+            <td>DeBERTa-v3-base</td>
+            <td>86M</td>
+            <td>92.1 F1</td>
+          </tr>
+          <tr class="highlight-row">
+            <td>DeBERTa-v3-xsmall</td>
+            <td>22M</td>
+            <td>89.7 F1</td>
+          </tr>
+          <tr>
+            <td>ELECTRA-small</td>
+            <td>14M</td>
+            <td>86.2 F1</td>
+          </tr>
+          <tr>
+            <td>TinyBERT-4</td>
+            <td>14.5M</td>
+            <td>85.1 F1</td>
+          </tr>
+        </table>
+        <p style="font-size:13px; color:var(--text-dim); margin-top:12px;">At 22M params, DeBERTa-v3-xsmall punches far above its weight. It's 14x smaller than the large version but only ~4 points behind on NER.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 11: SECTION — LANDSCAPE ==================== -->
+<div class="slide" data-section="CURRENT LANDSCAPE">
+  <div class="slide-content section-divider">
+    <div class="section-num">Part 3</div>
+    <h1>Current Solutions</h1>
+    <p class="section-desc">What exists today and why it's not good enough</p>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 12: SIZE COMPARISON ==================== -->
+<div class="slide" data-section="CURRENT LANDSCAPE">
+  <div class="slide-content">
+    <h2>The Problem: Too Big, Too Slow, Too General</h2>
+    <p class="subtitle" style="margin-bottom:20px;">Current PII detection models are designed for general purposes. They're massive and slow for what we need.</p>
+
+    <h3 style="margin-bottom:4px;">Model Size Comparison <span class="dim" style="font-weight:400; font-size:14px;">(parameters)</span></h3>
+    <div class="bar-chart">
+      <div class="bar-row">
+        <div class="bar-label">Roblox PII <span class="dim" style="font-size:11px;">XLM-R-Large</span></div>
+        <div class="bar-track"><div class="bar-fill red" style="width:100%;">560M</div></div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">Piiranha <span class="dim" style="font-size:11px;">mDeBERTa-base</span></div>
+        <div class="bar-track"><div class="bar-fill orange" style="width:50%;">280M</div></div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">GLiNER2 <span class="dim" style="font-size:11px;">DeBERTa bi-encoder</span></div>
+        <div class="bar-track"><div class="bar-fill orange" style="width:37%;">205M</div></div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">GLiNER-PII <span class="dim" style="font-size:11px;">DeBERTa fine-tuned</span></div>
+        <div class="bar-track"><div class="bar-fill orange" style="width:32%;">180M</div></div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label" style="color:var(--green); font-weight:700;">Ours (target) <span class="dim" style="font-size:11px;">DataFog v1</span></div>
+        <div class="bar-track"><div class="bar-fill green" style="width:4.1%;">22.7M</div></div>
+      </div>
+    </div>
+
+    <div class="key-insight" style="margin-top:20px;">
+      <div class="label">Our goal</div>
+      <div class="text">Build a model that is <strong>9x smaller</strong> than GLiNER2, but <strong>more accurate on PII</strong> — because it's purpose-built for the job.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 13: HOW GLINER2 WORKS ==================== -->
+<div class="slide" data-section="GLiNER2 vs OURS">
+  <div class="slide-content">
+    <h2>How GLiNER2 Actually Works</h2>
+    <p class="subtitle" style="margin-bottom:20px;">To compare fairly, let's first understand the model we're trying to beat.</p>
+
+    <div class="two-col">
+      <div>
+        <h3 style="margin-bottom:12px;">The GLiNER2 Approach</h3>
+        <div class="card" style="margin-bottom:12px;">
+          <h3 class="orange">Multi-Task Input Packing</h3>
+          <p style="font-size:13px; color:var(--text-dim); margin-top:6px; margin-bottom:12px;">GLiNER2 prepends special tokens that <em>tell</em> the model what to look for. Every entity type you want detected gets injected into the input:</p>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:12px; line-height:2; background:rgba(0,0,0,0.3); padding:12px 16px; border-radius:8px; overflow-x:auto;">
+            <span class="orange">[P]</span> Classify PII types <span class="dim">[SEP]</span><br>
+            <span class="cyan">[E]</span> email <span class="cyan">[E]</span> phone <span class="cyan">[E]</span> ssn <span class="cyan">[E]</span> name <span class="dim">[SEP]</span><br>
+            <span class="dim">[C]</span> sensitive <span class="dim">[C]</span> non-sensitive <span class="dim">[SEP]</span><br>
+            <span class="text">My name is John and my SSN is 123-45...</span>
+          </div>
+        </div>
+        <div class="card">
+          <h3 class="orange">Then What?</h3>
+          <p style="font-size:13px; color:var(--text-dim); margin-top:6px;">The whole thing — instructions + entity types + your actual text — gets fed through a single big DeBERTa encoder. The model learns to match spans of text to the entity type tokens.</p>
+        </div>
+      </div>
+      <div>
+        <h3 style="margin-bottom:12px;">Architecture Diagram</h3>
+        <div class="diagram" style="padding:20px;">
+          <div class="flow-diagram" style="gap:6px;">
+            <div class="flow-box" style="border-color:var(--orange); background:rgba(251,146,60,0.08); font-size:12px;">
+              [P] task + [E] entity types + [SEP] + text
+            </div>
+            <div class="flow-arrow">↓</div>
+            <div class="flow-box" style="border-color:var(--orange); background:rgba(251,146,60,0.1); min-width:280px;">
+              <div style="font-size:14px;">DeBERTa-v3-base</div>
+              <div style="font-size:11px; color:var(--text-dim);">12 layers · hidden 768 · 12 heads</div>
+              <div style="font-size:11px; color:var(--orange);">200M params</div>
+            </div>
+            <div class="flow-arrow">↓</div>
+            <div class="flow-box" style="border-color:var(--text-dim); background:rgba(255,255,255,0.03); font-size:12px;">
+              Span ↔ Entity Type Matching (~5M)
+            </div>
+            <div class="flow-arrow">↓</div>
+            <div class="flow-box" style="border-color:var(--orange); background:rgba(251,146,60,0.08); font-size:12px;">
+              NER + Classification + Relations + Key-Value
+            </div>
+          </div>
+        </div>
+        <div class="analogy" style="margin-top:12px;">
+          <div class="analogy-icon">💡</div>
+          <div class="analogy-text" style="font-size:13px;">GLiNER2 is a <strong>Swiss army knife</strong> — one model for many tasks. Flexible, but carries weight it doesn't need for PII alone.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 14: SIDE BY SIDE ARCHITECTURE ==================== -->
+<div class="slide" data-section="GLiNER2 vs OURS">
+  <div class="slide-content">
+    <h2>Architecture: Side by Side</h2>
+    <p class="subtitle" style="margin-bottom:20px;">Two fundamentally different philosophies for the same problem.</p>
+
+    <div style="display:grid; grid-template-columns:1fr 60px 1fr; gap:0; align-items:start;">
+      <!-- GLiNER2 Column -->
+      <div>
+        <div style="text-align:center; margin-bottom:16px;">
+          <span class="tag tag-orange" style="font-size:13px; padding:6px 16px;">GLiNER2</span>
+        </div>
+        <div class="card" style="border-color:var(--orange);">
+          <div style="font-size:13px; line-height:2.2;">
+            <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--card-border); padding-bottom:6px; margin-bottom:6px;">
+              <span class="dim">Philosophy</span>
+              <span style="text-align:right;">General-purpose, do everything</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--card-border); padding-bottom:6px; margin-bottom:6px;">
+              <span class="dim">Backbone</span>
+              <span>DeBERTa-v3-<strong>base</strong></span>
+            </div>
+            <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--card-border); padding-bottom:6px; margin-bottom:6px;">
+              <span class="dim">Hidden size</span>
+              <span>768</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--card-border); padding-bottom:6px; margin-bottom:6px;">
+              <span class="dim">Attention heads</span>
+              <span>12</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--card-border); padding-bottom:6px; margin-bottom:6px;">
+              <span class="dim">Layers</span>
+              <span>12</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--card-border); padding-bottom:6px; margin-bottom:6px;">
+              <span class="dim">Char-level features</span>
+              <span class="red">None</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--card-border); padding-bottom:6px; margin-bottom:6px;">
+              <span class="dim">PII pattern module</span>
+              <span class="red">None</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--card-border); padding-bottom:6px; margin-bottom:6px;">
+              <span class="dim">Output method</span>
+              <span>Span-entity matching</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--card-border); padding-bottom:6px; margin-bottom:6px;">
+              <span class="dim">Sequence validity</span>
+              <span class="red">Not enforced</span>
+            </div>
+            <div style="display:flex; justify-content:space-between;">
+              <span class="dim">Task scope</span>
+              <span>NER + RE + Cls + KVE</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- VS Column -->
+      <div style="display:flex; align-items:center; justify-content:center; height:100%; padding-top:60px;">
+        <div style="font-size:18px; font-weight:800; color:var(--text-dim);">vs</div>
+      </div>
+
+      <!-- Ours Column -->
+      <div>
+        <div style="text-align:center; margin-bottom:16px;">
+          <span class="tag tag-green" style="font-size:13px; padding:6px 16px;">DataFog v1</span>
+        </div>
+        <div class="card" style="border-color:var(--green);">
+          <div style="font-size:13px; line-height:2.2;">
+            <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--card-border); padding-bottom:6px; margin-bottom:6px;">
+              <span class="dim">Philosophy</span>
+              <span style="text-align:right;">PII-specialized, do one thing well</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--card-border); padding-bottom:6px; margin-bottom:6px;">
+              <span class="dim">Backbone</span>
+              <span>DeBERTa-v3-<strong>xsmall</strong></span>
+            </div>
+            <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--card-border); padding-bottom:6px; margin-bottom:6px;">
+              <span class="dim">Hidden size</span>
+              <span>384</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--card-border); padding-bottom:6px; margin-bottom:6px;">
+              <span class="dim">Attention heads</span>
+              <span>6</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--card-border); padding-bottom:6px; margin-bottom:6px;">
+              <span class="dim">Layers</span>
+              <span>12</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--card-border); padding-bottom:6px; margin-bottom:6px;">
+              <span class="dim">Char-level features</span>
+              <span class="green">CNN (3 filter widths)</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--card-border); padding-bottom:6px; margin-bottom:6px;">
+              <span class="dim">PII pattern module</span>
+              <span class="green">Gating fusion</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--card-border); padding-bottom:6px; margin-bottom:6px;">
+              <span class="dim">Output method</span>
+              <span>Token classification + CRF</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--card-border); padding-bottom:6px; margin-bottom:6px;">
+              <span class="dim">Sequence validity</span>
+              <span class="green">CRF enforced</span>
+            </div>
+            <div style="display:flex; justify-content:space-between;">
+              <span class="dim">Task scope</span>
+              <span>PII NER only</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 15: NUMBERS HEAD TO HEAD ==================== -->
+<div class="slide" data-section="GLiNER2 vs OURS">
+  <div class="slide-content">
+    <h2>By the Numbers</h2>
+    <p class="subtitle" style="margin-bottom:24px;">Hard metrics, head to head.</p>
+
+    <table class="compare-table" style="margin-bottom:24px;">
+      <tr>
+        <th style="width:200px;">Metric</th>
+        <th style="width:220px;">GLiNER2</th>
+        <th style="width:220px;">DataFog v1 (Target)</th>
+        <th>Advantage</th>
+      </tr>
+      <tr>
+        <td style="font-weight:600;">Parameters</td>
+        <td>205M</td>
+        <td class="green" style="font-weight:600;">22.7M</td>
+        <td><span class="tag tag-green">9× smaller</span></td>
+      </tr>
+      <tr>
+        <td style="font-weight:600;">Model size (disk)</td>
+        <td>~820 MB (FP32)</td>
+        <td class="green" style="font-weight:600;">~25 MB (INT8)</td>
+        <td><span class="tag tag-green">33× smaller</span></td>
+      </tr>
+      <tr>
+        <td style="font-weight:600;">CPU latency (est.)</td>
+        <td>~50-80ms</td>
+        <td class="green" style="font-weight:600;">~10ms (ONNX INT8)</td>
+        <td><span class="tag tag-green">5-8× faster</span></td>
+      </tr>
+      <tr>
+        <td style="font-weight:600;">Char-level patterns</td>
+        <td class="red">No</td>
+        <td class="green" style="font-weight:600;">Yes (CNN)</td>
+        <td><span class="tag tag-green">Ours</span></td>
+      </tr>
+      <tr>
+        <td style="font-weight:600;">Sequence validity</td>
+        <td class="red">No (heuristic)</td>
+        <td class="green" style="font-weight:600;">Yes (CRF)</td>
+        <td><span class="tag tag-green">Ours</span></td>
+      </tr>
+      <tr>
+        <td style="font-weight:600;">Zero-shot NER</td>
+        <td class="green" style="font-weight:600;">Yes (any entity)</td>
+        <td class="orange">No (PII types only)</td>
+        <td><span class="tag tag-orange">GLiNER2</span></td>
+      </tr>
+      <tr>
+        <td style="font-weight:600;">Multi-task IE</td>
+        <td class="green" style="font-weight:600;">NER + RE + Cls + KVE</td>
+        <td class="orange">PII NER only</td>
+        <td><span class="tag tag-orange">GLiNER2</span></td>
+      </tr>
+      <tr>
+        <td style="font-weight:600;">Training data</td>
+        <td>254K (47% GPT-4o)</td>
+        <td style="font-weight:600;">360K+ (all open)</td>
+        <td><span class="tag tag-green">40% more, $0</span></td>
+      </tr>
+      <tr>
+        <td style="font-weight:600;">Entity types</td>
+        <td>Unlimited (zero-shot)<br><span style="font-size:11px;" class="dim">but degrades &gt;30 types</span></td>
+        <td style="font-weight:600;">50+ fixed PII types<br><span style="font-size:11px;" class="dim">no degradation at scale</span></td>
+        <td><span class="tag tag-accent">Different</span></td>
+      </tr>
+      <tr>
+        <td style="font-weight:600;">GPU required?</td>
+        <td>Recommended</td>
+        <td class="green" style="font-weight:600;">No — CPU only</td>
+        <td><span class="tag tag-green">Ours</span></td>
+      </tr>
+    </table>
+
+    <div class="key-insight">
+      <div class="label">The trade-off</div>
+      <div class="text">GLiNER2 wins on <strong>flexibility</strong> — it can handle any entity type and multiple IE tasks. We win on <strong>everything PII-specific</strong>: speed, size, pattern handling, sequence validity. Since DataFog only needs PII detection, the trade-off is clearly in our favor.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 16: INFERENCE COMPARED ==================== -->
+<div class="slide" data-section="GLiNER2 vs OURS">
+  <div class="slide-content">
+    <h2>Inference: How Each Model Thinks</h2>
+    <p class="subtitle" style="margin-bottom:24px;">The same input, processed two very different ways.</p>
+
+    <div class="two-col">
+      <div>
+        <div style="text-align:center; margin-bottom:12px;">
+          <span class="tag tag-orange" style="font-size:13px; padding:6px 16px;">GLiNER2's Approach</span>
+        </div>
+        <div class="card" style="border-color:var(--orange);">
+          <div style="font-size:13px; line-height:1.8;">
+            <div style="margin-bottom:12px;">
+              <span class="orange" style="font-weight:600;">Step 1:</span> Pack entity type names into input<br>
+              <span class="dim" style="font-size:11px;">→ Input gets longer with every type you add</span>
+            </div>
+            <div style="margin-bottom:12px;">
+              <span class="orange" style="font-weight:600;">Step 2:</span> Feed everything through 768-dim encoder<br>
+              <span class="dim" style="font-size:11px;">→ 200M params process both instructions and text</span>
+            </div>
+            <div style="margin-bottom:12px;">
+              <span class="orange" style="font-weight:600;">Step 3:</span> Match every possible span to every entity type<br>
+              <span class="dim" style="font-size:11px;">→ O(n² × types) comparisons — slows with more types</span>
+            </div>
+            <div>
+              <span class="orange" style="font-weight:600;">Step 4:</span> Rank and threshold matches<br>
+              <span class="dim" style="font-size:11px;">→ No structural guarantee of valid sequences</span>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:12px; padding:12px 16px; background:rgba(251,146,60,0.08); border-radius:8px; border:1px solid rgba(251,146,60,0.2); font-size:13px;">
+          <strong class="orange">Bottleneck:</strong> More PII types = longer input = slower. GLiNER2 degrades with >30 entity types.
+        </div>
+      </div>
+      <div>
+        <div style="text-align:center; margin-bottom:12px;">
+          <span class="tag tag-green" style="font-size:13px; padding:6px 16px;">DataFog v1's Approach</span>
+        </div>
+        <div class="card" style="border-color:var(--green);">
+          <div style="font-size:13px; line-height:1.8;">
+            <div style="margin-bottom:12px;">
+              <span class="green" style="font-weight:600;">Step 1:</span> Tokenize text only (no type packing)<br>
+              <span class="dim" style="font-size:11px;">→ Input length is just the text, nothing extra</span>
+            </div>
+            <div style="margin-bottom:12px;">
+              <span class="green" style="font-weight:600;">Step 2a:</span> Character CNN scans for patterns<br>
+              <span class="dim" style="font-size:11px;">→ 0.3M params, sub-ms, catches digit/symbol patterns</span>
+            </div>
+            <div style="margin-bottom:12px;">
+              <span class="green" style="font-weight:600;">Step 2b:</span> DeBERTa reads context (in parallel)<br>
+              <span class="dim" style="font-size:11px;">→ 22M params, 384-dim, understands meaning</span>
+            </div>
+            <div style="margin-bottom:12px;">
+              <span class="green" style="font-weight:600;">Step 3:</span> Gate fuses both signals per token<br>
+              <span class="dim" style="font-size:11px;">→ Automatic character vs. context weighting</span>
+            </div>
+            <div>
+              <span class="green" style="font-weight:600;">Step 4:</span> CRF decodes valid BIO sequence<br>
+              <span class="dim" style="font-size:11px;">→ Guaranteed valid output, O(n × K²) — fast</span>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:12px; padding:12px 16px; background:rgba(52,211,153,0.08); border-radius:8px; border:1px solid rgba(52,211,153,0.2); font-size:13px;">
+          <strong class="green">Key advantage:</strong> Adding more PII types doesn't slow inference — it's just more output labels, not more input.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 17: WHY OURS CAN WIN ==================== -->
+<div class="slide" data-section="GLiNER2 vs OURS">
+  <div class="slide-content">
+    <h2>Why Smaller Can Be Better</h2>
+    <p class="subtitle" style="margin-bottom:20px;">How a 22.7M model can beat a 205M model on PII detection.</p>
+
+    <div class="card-grid cols-2" style="margin-bottom:20px;">
+      <div class="card" style="border-color:var(--cyan);">
+        <div class="card-icon">🎯</div>
+        <h3 class="cyan">Specialization Beats Generalization</h3>
+        <p style="margin-top:6px;">GLiNER2 uses its 205M parameters to learn about <em>every</em> kind of entity and <em>four</em> different tasks. Our 22.7M parameters focus entirely on PII patterns. A sports car beats an SUV on a racetrack.</p>
+      </div>
+      <div class="card" style="border-color:var(--green);">
+        <div class="card-icon">🔢</div>
+        <h3 class="green">Built-in Pattern Detection</h3>
+        <p style="margin-top:6px;">GLiNER2 must <em>learn</em> that "123-45-6789" is an SSN purely from training data. Our character CNN gives the model a structural "eye" for digit patterns — it has a head start before training even begins.</p>
+      </div>
+      <div class="card" style="border-color:var(--pink);">
+        <div class="card-icon">⚡</div>
+        <h3 class="pink">Inductive Bias</h3>
+        <p style="margin-top:6px;">The gating mechanism <em>encodes our knowledge</em> that PII has two natures (structured + soft) directly into the architecture. GLiNER2 has no such prior — it must discover this from data alone.</p>
+      </div>
+      <div class="card" style="border-color:var(--yellow);">
+        <div class="card-icon">📊</div>
+        <h3 class="yellow">More PII Training Data</h3>
+        <p style="margin-top:6px;">We train on 360K PII-specific examples vs. GLiNER2's 254K general IE examples. More relevant data + architecture that knows what to look for = better PII performance.</p>
+      </div>
+    </div>
+
+    <div class="analogy">
+      <div class="analogy-icon">💡</div>
+      <div class="analogy-text"><strong>The kitchen analogy:</strong> GLiNER2 is a fully-equipped restaurant kitchen — it can make any dish, but it's expensive and takes up a whole floor. We're building a purpose-built pizza oven. It only makes pizza, but it makes <em>better</em> pizza, <em>faster</em>, in a fraction of the space.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 18: SECTION — ARCHITECTURE ==================== -->
+<div class="slide" data-section="OUR ARCHITECTURE">
+  <div class="slide-content section-divider">
+    <div class="section-num">Part 4</div>
+    <h1>Our Architecture</h1>
+    <p class="section-desc">The novel design that makes this possible</p>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 14: THE BIG IDEA ==================== -->
+<div class="slide" data-section="OUR ARCHITECTURE">
+  <div class="slide-content">
+    <h2>The Big Idea: Two Eyes, One Brain</h2>
+    <p class="subtitle" style="margin-bottom:24px;">Our model has two separate "eyes" that look at text differently, then a smart fusion layer combines their views.</p>
+
+    <div class="card-grid cols-3" style="margin-bottom:20px;">
+      <div class="card" style="border-color:var(--cyan); text-align:center;">
+        <div style="font-size:48px; margin-bottom:12px;">🔍</div>
+        <h3 class="cyan">Eye 1: Characters</h3>
+        <p style="margin-top:8px;">Looks at individual characters and short patterns. Spots things like "XXX-XX-XXXX" or "@" symbols.</p>
+        <div class="tag tag-cyan" style="margin-top:12px;">Character CNN</div>
+      </div>
+      <div class="card" style="border-color:var(--pink); text-align:center;">
+        <div style="font-size:48px; margin-bottom:12px;">📖</div>
+        <h3 class="pink">Eye 2: Context</h3>
+        <p style="margin-top:8px;">Reads the whole sentence to understand meaning. Knows "Jordan" after "my name is" = a name.</p>
+        <div class="tag" style="background:rgba(244,114,182,0.2); color:var(--pink); margin-top:12px;">DeBERTa Encoder</div>
+      </div>
+      <div class="card" style="border-color:var(--green); text-align:center;">
+        <div style="font-size:48px; margin-bottom:12px;">⚖️</div>
+        <h3 class="green">Smart Switch</h3>
+        <p style="margin-top:8px;">Learns when to trust each eye. For "123-45-6789" → trust characters. For "Jordan Lee" → trust context.</p>
+        <div class="tag tag-green" style="margin-top:12px;">Gating Fusion</div>
+      </div>
+    </div>
+
+    <div class="analogy">
+      <div class="analogy-icon">💡</div>
+      <div class="analogy-text"><strong>Why this is novel:</strong> No published model combines these two approaches for PII detection. General NER models rely on context alone. Regex tools rely on patterns alone. We do both, in one model, with a learned switch.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 15: CHARACTER CNN ==================== -->
+<div class="slide" data-section="OUR ARCHITECTURE">
+  <div class="slide-content">
+    <h2>Component 1: Character CNN</h2>
+    <p class="subtitle" style="margin-bottom:20px;">A small, fast neural network that reads individual characters to detect patterns.</p>
+
+    <div class="two-col">
+      <div>
+        <h3 style="margin-bottom:12px;">How it works</h3>
+        <div class="card" style="margin-bottom:12px;">
+          <div style="font-family:'JetBrains Mono',monospace; font-size:14px; line-height:1.8;">
+            <span class="dim">Word:</span> "123-45-6789"<br>
+            <span class="dim">Characters:</span> [1][2][3][-][4][5][-][6][7][8][9]<br><br>
+            <span class="dim">Filter size 3 scans:</span><br>
+            <span class="cyan">[1,2,3]</span> → "three digits in a row"<br>
+            <span class="cyan">[3,-,4]</span> → "digit-dash-digit"<br>
+            <span class="cyan">[-,4,5]</span> → "dash then digits"<br>
+            <span class="dim">...slides across all characters</span>
+          </div>
+        </div>
+        <p style="font-size:14px; color:var(--text-dim);">Three filter sizes (3, 4, 5 characters wide) catch patterns at different scales.</p>
+      </div>
+      <div>
+        <h3 style="margin-bottom:12px;">What it detects</h3>
+        <ul class="check-list">
+          <li>Digit sequences (SSNs, credit cards, phones)</li>
+          <li>Separators between digits (dashes, dots, spaces)</li>
+          <li>@ symbols and dots (emails)</li>
+          <li>Mixed case patterns (camelCase usernames)</li>
+          <li>Common suffixes (.com, .org, .gov)</li>
+        </ul>
+
+        <div style="margin-top:20px; padding:16px; background:var(--card); border-radius:10px; border:1px solid var(--card-border);">
+          <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+            <span style="font-size:13px; font-weight:600;">Size</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--green);">~0.3M params</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+            <span style="font-size:13px; font-weight:600;">Speed</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--green);">sub-millisecond</span>
+          </div>
+          <div style="display:flex; justify-content:space-between;">
+            <span style="font-size:13px; font-weight:600;">Output</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--green);">150 numbers per token</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="analogy">
+      <div class="analogy-icon">💡</div>
+      <div class="analogy-text">Think of it as a pattern-matching expert who can spot that "123-45-6789" <em>looks like</em> an SSN just from its shape — without needing to read the surrounding sentence.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 16: GATING FUSION ==================== -->
+<div class="slide" data-section="OUR ARCHITECTURE">
+  <div class="slide-content">
+    <h2>Component 2: The Gating Fusion</h2>
+    <p class="subtitle" style="margin-bottom:24px;">This is our <strong>novel contribution</strong> — a smart switch that dynamically decides how much to trust each "eye" for each token.</p>
+
+    <div class="card" style="margin-bottom:20px;">
+      <h3 style="margin-bottom:16px;">How it decides</h3>
+      <div style="display:grid; grid-template-columns: 1fr auto 1fr; gap:16px; align-items:center;">
+        <div style="text-align:center;">
+          <div style="padding:12px; border-radius:8px; background:rgba(34,211,238,0.1); border:2px solid var(--cyan); margin-bottom:8px;">
+            <div style="font-size:13px; font-weight:600; color:var(--cyan);">Character Signal</div>
+            <div style="font-size:12px; color:var(--text-dim);">150 numbers</div>
+          </div>
+        </div>
+        <div style="text-align:center;">
+          <div style="width:50px; height:50px; border-radius:50%; background:var(--green); display:flex; align-items:center; justify-content:center; font-size:20px; font-weight:700; margin:0 auto 8px;">g</div>
+          <div style="font-size:12px; color:var(--text-dim);">Gate (0 to 1)</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="padding:12px; border-radius:8px; background:rgba(244,114,182,0.1); border:2px solid var(--pink); margin-bottom:8px;">
+            <div style="font-size:13px; font-weight:600; color:var(--pink);">Context Signal</div>
+            <div style="font-size:12px; color:var(--text-dim);">384 numbers</div>
+          </div>
+        </div>
+      </div>
+      <div style="text-align:center; margin-top:16px; font-family:'JetBrains Mono',monospace; font-size:14px;">
+        output = <span class="green">g</span> × <span class="cyan">characters</span> + (1 − <span class="green">g</span>) × <span class="pink">context</span>
+      </div>
+    </div>
+
+    <div class="card-grid cols-2">
+      <div class="card" style="border-color:var(--cyan);">
+        <h3>When g is high (~0.9)</h3>
+        <p style="font-size:14px; color:var(--text-dim); margin-top:6px;">Trust the character eye more</p>
+        <div style="margin-top:10px; font-size:13px; line-height:1.8;">
+          <span class="cyan">●</span> "123-45-6789" → SSN<br>
+          <span class="cyan">●</span> "john@email.com" → Email<br>
+          <span class="cyan">●</span> "4532-1234-5678-9012" → CC
+        </div>
+      </div>
+      <div class="card" style="border-color:var(--pink);">
+        <h3>When g is low (~0.1)</h3>
+        <p style="font-size:14px; color:var(--text-dim); margin-top:6px;">Trust the context eye more</p>
+        <div style="margin-top:10px; font-size:13px; line-height:1.8;">
+          <span class="pink">●</span> "Jordan Lee" → Person name<br>
+          <span class="pink">●</span> "Acme Corporation" → Organization<br>
+          <span class="pink">●</span> "742 Elm Street" → Address
+        </div>
+      </div>
+    </div>
+
+    <div class="key-insight" style="margin-top:16px;">
+      <div class="label">Why this matters</div>
+      <div class="text">The gate is <strong>learned, not programmed</strong>. The model figures out on its own when to rely on patterns vs. context. This is what makes it novel — no one has published this approach for PII.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 17: CRF ==================== -->
+<div class="slide" data-section="OUR ARCHITECTURE">
+  <div class="slide-content">
+    <h2>Component 3: CRF Output Layer</h2>
+    <p class="subtitle" style="margin-bottom:20px;">The final "grammar checker" that ensures the model's output makes sense.</p>
+
+    <div class="two-col">
+      <div>
+        <h3 style="margin-bottom:12px;">The BIO tagging system</h3>
+        <p style="font-size:14px; color:var(--text-dim); line-height:1.6; margin-bottom:16px;">Each token gets one of three labels for each PII type:</p>
+        <div class="card" style="margin-bottom:12px;">
+          <div style="font-family:'JetBrains Mono',monospace; font-size:14px; line-height:2.2;">
+            <span style="color:var(--green);">B</span>-PERSON = <strong>B</strong>eginning of a person name<br>
+            <span style="color:var(--cyan);">I</span>-PERSON = <strong>I</strong>nside a person name<br>
+            <span style="color:var(--text-dim);">O</span> = <strong>O</strong>utside (not PII)
+          </div>
+        </div>
+        <div class="card">
+          <h3 style="font-size:14px;">Example</h3>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:13px; line-height:2.2; margin-top:8px;">
+            <span class="dim">My</span> → O<br>
+            <span class="accent">John</span> → <span class="green">B</span>-PERSON<br>
+            <span class="accent">Smith</span> → <span class="cyan">I</span>-PERSON<br>
+            <span class="dim">lives</span> → O<br>
+            <span class="dim">at</span> → O<br>
+            <span class="orange">742</span> → <span class="green">B</span>-ADDRESS<br>
+            <span class="orange">Elm</span> → <span class="cyan">I</span>-ADDRESS
+          </div>
+        </div>
+      </div>
+      <div>
+        <h3 style="margin-bottom:12px;">What the CRF does</h3>
+        <p style="font-size:14px; color:var(--text-dim); line-height:1.6; margin-bottom:16px;">Without CRF, the model might output impossible sequences. CRF prevents this:</p>
+        <div class="card" style="margin-bottom:12px; border-color:var(--red);">
+          <h3 style="font-size:14px;">
+            <span class="red">✗</span> Without CRF (broken)
+          </h3>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:13px; line-height:2; margin-top:8px; color:var(--text-dim);">
+            John → <span class="red">I</span>-PERSON <span class="dim">(can't start with I!)</span><br>
+            Smith → <span class="red">B</span>-SSN <span class="dim">(SSN after PERSON?)</span>
+          </div>
+        </div>
+        <div class="card" style="border-color:var(--green);">
+          <h3 style="font-size:14px;">
+            <span class="green">✓</span> With CRF (correct)
+          </h3>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:13px; line-height:2; margin-top:8px;">
+            John → <span class="green">B</span>-PERSON<br>
+            Smith → <span class="cyan">I</span>-PERSON
+          </div>
+        </div>
+        <div style="margin-top:16px; padding:12px 16px; background:var(--card); border-radius:8px; border:1px solid var(--card-border);">
+          <div style="display:flex; justify-content:space-between;">
+            <span style="font-size:13px;">Speed overhead</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--green);">< 1ms</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="analogy">
+      <div class="analogy-icon">💡</div>
+      <div class="analogy-text">CRF is like spell-check for entity labels. It knows the "grammar rules" (B must come before I, you can't jump from PERSON to SSN mid-entity) and corrects mistakes.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 18: FULL ARCHITECTURE ==================== -->
+<div class="slide" data-section="OUR ARCHITECTURE">
+  <div class="slide-content">
+    <h2>The Complete Architecture</h2>
+    <p class="subtitle" style="margin-bottom:20px;">All pieces together — from raw text to PII predictions in <strong>under 30ms</strong>.</p>
+
+    <div class="diagram">
+      <svg viewBox="0 0 800 480" width="800" height="480" class="arch-svg">
+        <!-- Input -->
+        <rect x="250" y="10" width="300" height="40" rx="8" fill="#1a1a24" stroke="#4a4a5a" stroke-width="1.5"/>
+        <text x="400" y="35" text-anchor="middle" fill="#e8e8f0" font-size="14" font-weight="600">Raw Text Input</text>
+
+        <!-- Arrow -->
+        <line x1="400" y1="50" x2="400" y2="75" stroke="#4a4a5a" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+
+        <!-- Split into two paths -->
+        <!-- Tokenizer -->
+        <rect x="250" y="78" width="300" height="36" rx="8" fill="rgba(99,102,241,0.15)" stroke="#6366f1" stroke-width="1.5"/>
+        <text x="400" y="101" text-anchor="middle" fill="#818cf8" font-size="13" font-weight="600">Tokenizer (text → tokens)</text>
+
+        <!-- Split arrows -->
+        <line x1="320" y1="114" x2="180" y2="150" stroke="#4a4a5a" stroke-width="1.5"/>
+        <line x1="480" y1="114" x2="620" y2="150" stroke="#4a4a5a" stroke-width="1.5"/>
+
+        <!-- Character CNN (left path) -->
+        <rect x="60" y="152" width="240" height="80" rx="10" fill="rgba(34,211,238,0.1)" stroke="#22d3ee" stroke-width="2"/>
+        <text x="180" y="178" text-anchor="middle" fill="#22d3ee" font-size="14" font-weight="700">Character CNN</text>
+        <text x="180" y="198" text-anchor="middle" fill="#8888a0" font-size="11">3 filter widths × 50 filters</text>
+        <text x="180" y="215" text-anchor="middle" fill="#8888a0" font-size="11">→ 150-dim per token</text>
+        <text x="275" y="225" text-anchor="end" fill="#22d3ee" font-size="10" font-weight="600">0.3M params</text>
+
+        <!-- DeBERTa (right path) -->
+        <rect x="500" y="152" width="240" height="80" rx="10" fill="rgba(244,114,182,0.1)" stroke="#f472b6" stroke-width="2"/>
+        <text x="620" y="178" text-anchor="middle" fill="#f472b6" font-size="14" font-weight="700">DeBERTa-v3-xsmall</text>
+        <text x="620" y="198" text-anchor="middle" fill="#8888a0" font-size="11">12 layers, 6 heads, hidden 384</text>
+        <text x="620" y="215" text-anchor="middle" fill="#8888a0" font-size="11">→ 384-dim per token</text>
+        <text x="715" y="225" text-anchor="end" fill="#f472b6" font-size="10" font-weight="600">22M params</text>
+
+        <!-- Merge arrows -->
+        <line x1="180" y1="232" x2="340" y2="280" stroke="#22d3ee" stroke-width="1.5"/>
+        <line x1="620" y1="232" x2="460" y2="280" stroke="#f472b6" stroke-width="1.5"/>
+
+        <!-- Gating Fusion -->
+        <rect x="270" y="280" width="260" height="56" rx="10" fill="rgba(52,211,153,0.12)" stroke="#34d399" stroke-width="2"/>
+        <text x="400" y="304" text-anchor="middle" fill="#34d399" font-size="14" font-weight="700">Gating Fusion</text>
+        <text x="400" y="322" text-anchor="middle" fill="#8888a0" font-size="11">g × char + (1-g) × context</text>
+        <text x="505" y="330" text-anchor="end" fill="#34d399" font-size="10" font-weight="600">0.1M params</text>
+
+        <!-- Arrow -->
+        <line x1="400" y1="336" x2="400" y2="366" stroke="#4a4a5a" stroke-width="1.5"/>
+
+        <!-- CRF -->
+        <rect x="270" y="368" width="260" height="50" rx="10" fill="rgba(251,191,36,0.1)" stroke="#fbbf24" stroke-width="2"/>
+        <text x="400" y="390" text-anchor="middle" fill="#fbbf24" font-size="14" font-weight="700">Token Classifier + CRF</text>
+        <text x="400" y="406" text-anchor="middle" fill="#8888a0" font-size="11">BIO sequence decoding</text>
+        <text x="505" y="410" text-anchor="end" fill="#fbbf24" font-size="10" font-weight="600">0.3M params</text>
+
+        <!-- Arrow -->
+        <line x1="400" y1="418" x2="400" y2="442" stroke="#4a4a5a" stroke-width="1.5"/>
+
+        <!-- Output -->
+        <rect x="250" y="444" width="300" height="36" rx="8" fill="rgba(52,211,153,0.2)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="400" y="467" text-anchor="middle" fill="#34d399" font-size="14" font-weight="700">PII Entity Predictions</text>
+
+        <!-- Total params -->
+        <rect x="600" y="370" width="160" height="46" rx="8" fill="rgba(99,102,241,0.1)" stroke="#6366f1" stroke-width="1.5" stroke-dasharray="4"/>
+        <text x="680" y="390" text-anchor="middle" fill="#818cf8" font-size="12" font-weight="700">TOTAL: 22.7M</text>
+        <text x="680" y="406" text-anchor="middle" fill="#8888a0" font-size="10">9× smaller than GLiNER2</text>
+
+        <!-- Arrow marker -->
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#4a4a5a"/>
+          </marker>
+        </defs>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 19: SPEED ==================== -->
+<div class="slide" data-section="OUR ARCHITECTURE">
+  <div class="slide-content">
+    <h2>Speed & Deployment</h2>
+    <p class="subtitle" style="margin-bottom:20px;">The model can be optimized for blazing-fast CPU inference using ONNX Runtime.</p>
+
+    <div class="two-col">
+      <div>
+        <h3 style="margin-bottom:12px;">Latency (128 tokens)</h3>
+        <div class="bar-chart">
+          <div class="bar-row">
+            <div class="bar-label" style="width:140px;">PyTorch FP32</div>
+            <div class="bar-track"><div class="bar-fill orange" style="width:100%;">~25ms</div></div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-label" style="width:140px;">ONNX FP32</div>
+            <div class="bar-track"><div class="bar-fill cyan" style="width:80%;">~20ms</div></div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-label" style="width:140px; color:var(--green); font-weight:700;">ONNX INT8</div>
+            <div class="bar-track"><div class="bar-fill green" style="width:40%;">~10ms</div></div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-label" style="width:140px;">CoreML (Mac)</div>
+            <div class="bar-track"><div class="bar-fill purple" style="width:15%;">~3ms</div></div>
+          </div>
+        </div>
+
+        <h3 style="margin-top:24px; margin-bottom:12px;">Model Size on Disk</h3>
+        <div class="bar-chart">
+          <div class="bar-row">
+            <div class="bar-label" style="width:140px;">FP32</div>
+            <div class="bar-track"><div class="bar-fill orange" style="width:100%;">~90 MB</div></div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-label" style="width:140px; color:var(--green); font-weight:700;">INT8 quantized</div>
+            <div class="bar-track"><div class="bar-fill green" style="width:30%;">~25 MB</div></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <h3 style="margin-bottom:12px;">What does this mean?</h3>
+        <div class="card" style="margin-bottom:12px;">
+          <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+            <div style="font-size:32px;">⚡</div>
+            <div>
+              <div style="font-weight:600;">Real-time processing</div>
+              <div style="font-size:13px; color:var(--text-dim);">10ms means you can process 100 documents per second on a single CPU core</div>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+            <div style="font-size:32px;">📱</div>
+            <div>
+              <div style="font-weight:600;">Runs anywhere</div>
+              <div style="font-size:13px; color:var(--text-dim);">25 MB model fits on phones, edge devices, serverless functions — no GPU needed</div>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div style="font-size:32px;">💰</div>
+            <div>
+              <div style="font-weight:600;">Dirt cheap to operate</div>
+              <div style="font-size:13px; color:var(--text-dim);">CPU-only inference costs a fraction of GPU-dependent models</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="key-insight">
+          <div class="label">ONNX explained</div>
+          <div class="text" style="font-size:14px;">ONNX is a format that converts your trained model into an optimized version. INT8 means using smaller numbers (8-bit vs 32-bit) for a 4× size reduction with minimal accuracy loss.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 20: SECTION — DATA ==================== -->
+<div class="slide" data-section="DATA & EVALUATION">
+  <div class="slide-content section-divider">
+    <div class="section-num">Part 5</div>
+    <h1>Training Data & Evaluation</h1>
+    <p class="section-desc">What we train on, and how we know it works</p>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 21: TRAINING DATA ==================== -->
+<div class="slide" data-section="DATA & EVALUATION">
+  <div class="slide-content">
+    <h2>Training Data: 360K Examples, $0 Cost</h2>
+    <p class="subtitle" style="margin-bottom:20px;">All core training data is freely available on HuggingFace under permissive open-source licenses.</p>
+
+    <div class="card-grid cols-3" style="margin-bottom:20px;">
+      <div class="card" style="border-color:var(--green);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <h3 style="font-size:15px;">AI4Privacy</h3>
+          <span class="tag tag-green">Apache 2.0</span>
+        </div>
+        <div class="big-number" style="font-size:36px; margin-bottom:4px;">200K</div>
+        <p style="font-size:13px; color:var(--text-dim);">examples across 50+ PII types. Largest PII-specific dataset. Multilingual.</p>
+      </div>
+      <div class="card" style="border-color:var(--accent);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <h3 style="font-size:15px;">NVIDIA Nemotron</h3>
+          <span class="tag tag-accent">CC-BY-4.0</span>
+        </div>
+        <div class="big-number" style="font-size:36px; margin-bottom:4px;">100K</div>
+        <p style="font-size:13px; color:var(--text-dim);">examples, 15+ types. High quality synthetic data from NVIDIA. English-focused.</p>
+      </div>
+      <div class="card" style="border-color:var(--cyan);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <h3 style="font-size:15px;">Gretel Synthetic</h3>
+          <span class="tag tag-cyan">Apache 2.0</span>
+        </div>
+        <div class="big-number" style="font-size:36px; margin-bottom:4px;">70K</div>
+        <p style="font-size:13px; color:var(--text-dim);">examples, 12+ types. Synthetic PII data with realistic distributions.</p>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div>
+        <h3 style="margin-bottom:8px;">PII Sensitivity Tiers</h3>
+        <div class="tier-grid">
+          <div class="tier-card" style="background:rgba(248,113,113,0.08); border-color:rgba(248,113,113,0.3);">
+            <h4 class="red">Tier 1 — Critical</h4>
+            <div class="examples">SSN, credit cards, bank accounts, passport numbers</div>
+            <div class="target red">Target: ≥ 98% recall</div>
+          </div>
+          <div class="tier-card" style="background:rgba(251,146,60,0.08); border-color:rgba(251,146,60,0.3);">
+            <h4 class="orange">Tier 2 — High</h4>
+            <div class="examples">Full names, email addresses, phone numbers, DOB</div>
+            <div class="target orange">Target: ≥ 95% recall</div>
+          </div>
+          <div class="tier-card" style="background:rgba(251,191,36,0.08); border-color:rgba(251,191,36,0.3);">
+            <h4 class="yellow">Tier 3 — Moderate</h4>
+            <div class="examples">Usernames, dates, locations, organizations</div>
+            <div class="target yellow">Target: ≥ 90% recall</div>
+          </div>
+          <div class="tier-card" style="background:rgba(99,102,241,0.08); border-color:rgba(99,102,241,0.3);">
+            <h4 class="accent">Tier 4 — Domain</h4>
+            <div class="examples">Medical record numbers, employee IDs, custom types</div>
+            <div class="target accent">Target: ≥ 85% recall</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <h3 style="margin-bottom:8px;">Why recall matters most for PII</h3>
+        <div class="card" style="margin-bottom:12px;">
+          <p style="font-size:14px; line-height:1.6;">In PII detection, <strong>missing a real SSN is far worse than flagging a random number</strong>. That's why we measure recall (what % of real PII did we catch?) more heavily than precision (what % of flagged items were actually PII?).</p>
+        </div>
+        <div class="card" style="background:rgba(52,211,153,0.05); border-color:rgba(52,211,153,0.3);">
+          <h3 style="font-size:14px; color:var(--green);">F2 / F5 Metrics</h3>
+          <p style="font-size:13px; color:var(--text-dim); margin-top:6px;">Standard F1 score weights precision and recall equally. <strong>F2</strong> weights recall 2× more. <strong>F5</strong> weights it 5× more. For critical PII, we use recall-heavy metrics.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 22: SECTION — DECISION ==================== -->
+<div class="slide" data-section="THE DECISION">
+  <div class="slide-content section-divider">
+    <div class="section-num">Part 6</div>
+    <h1>The Decision</h1>
+    <p class="section-desc">What's novel, what we recommend, and what's next</p>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 23: NOVEL CONTRIBUTIONS ==================== -->
+<div class="slide" data-section="THE DECISION">
+  <div class="slide-content">
+    <h2>What Makes This Novel</h2>
+    <p class="subtitle" style="margin-bottom:20px;">These are genuine gaps in the research that our architecture fills.</p>
+
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      <div class="card" style="border-left:4px solid var(--green); display:flex; gap:20px; align-items:flex-start;">
+        <div style="font-size:32px; font-weight:900; color:var(--green); flex-shrink:0; width:40px; text-align:center;">1</div>
+        <div>
+          <h3>Joint Character-Contextual Architecture for PII</h3>
+          <p style="font-size:14px; color:var(--text-dim); margin-top:4px;">No published work combines character CNNs with efficient transformers and a learned gating mechanism specifically for PII. This is our <strong>primary novel contribution</strong>.</p>
+          <div style="margin-top:8px;">
+            <span class="tag tag-green">Genuinely Novel</span>
+            <span class="tag tag-accent">Very High Impact</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="border-left:4px solid var(--cyan); display:flex; gap:20px; align-items:flex-start;">
+        <div style="font-size:32px; font-weight:900; color:var(--cyan); flex-shrink:0; width:40px; text-align:center;">2</div>
+        <div>
+          <h3>PII-Specific Pretraining (NuNER for PII)</h3>
+          <p style="font-size:14px; color:var(--text-dim); margin-top:4px;">Entity-biased contrastive pretraining on PII-dense text. The NuNER paradigm works great for general NER but nobody has applied it to PII-specific corpora.</p>
+          <div style="margin-top:8px;">
+            <span class="tag tag-green">Genuinely Novel</span>
+            <span class="tag tag-accent">Very High Impact</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="border-left:4px solid var(--orange); display:flex; gap:20px; align-items:flex-start;">
+        <div style="font-size:32px; font-weight:900; color:var(--orange); flex-shrink:0; width:40px; text-align:center;">3</div>
+        <div>
+          <h3>Cross-Domain PII Benchmark</h3>
+          <p style="font-size:14px; color:var(--text-dim); margin-top:4px;">First standardized benchmark spanning medical, financial, legal, and conversational domains with consistent taxonomy. Currently, every paper uses different test data.</p>
+          <div style="margin-top:8px;">
+            <span class="tag tag-orange">Novel with caveats</span>
+            <span class="tag tag-accent">High Impact</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="key-insight" style="margin-top:16px;">
+      <div class="label">Paper-worthy</div>
+      <div class="text" style="font-size:15px;">"First PII-specific task foundation model with a multi-granularity architecture that jointly learns structural and contextual patterns, achieving SOTA at a fraction of parameter cost."</div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SLIDE 24: RECOMMENDATION ==================== -->
+<div class="slide" data-section="THE DECISION">
+  <div class="slide-content">
+    <h2>The Recommendation</h2>
+    <p class="subtitle" style="margin-bottom:24px;">After surveying 100+ papers, 20+ systems, and all major PII datasets — here's the path forward.</p>
+
+    <div class="two-col">
+      <div>
+        <div class="card" style="border:2px solid var(--green); margin-bottom:16px;">
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+            <span style="font-size:24px;">✅</span>
+            <h3 style="color:var(--green);">Build DataFog PII-NER v1</h3>
+          </div>
+          <table style="width:100%; font-size:13px; line-height:2;">
+            <tr><td class="dim" style="width:120px;">Backbone</td><td>DeBERTa-v3-xsmall (22M)</td></tr>
+            <tr><td class="dim">Char encoder</td><td>CNN [3,4,5] × 50 filters</td></tr>
+            <tr><td class="dim">Fusion</td><td>Sigmoid gating</td></tr>
+            <tr><td class="dim">Output</td><td>Token classification + CRF</td></tr>
+            <tr><td class="dim">Total size</td><td class="green" style="font-weight:600;">~22.7M params</td></tr>
+            <tr><td class="dim">Deployed</td><td>ONNX INT8, ~25 MB, ~10ms</td></tr>
+          </table>
+        </div>
+
+        <div class="card">
+          <h3 style="margin-bottom:10px;">Success Criteria</h3>
+          <div style="font-size:14px; line-height:2;">
+            <span class="green">●</span> ≥ 0.90 F1 on PIILO benchmark<br>
+            <span class="green">●</span> ≥ 0.98 recall on Tier 1 PII<br>
+            <span class="green">●</span> < 50ms P99 latency on CPU<br>
+            <span class="green">●</span> < 50M parameters<br>
+            <span class="green">●</span> Beat GLiNER2 on PII-specific tests
+          </div>
+        </div>
+      </div>
+      <div>
+        <h3 style="margin-bottom:12px;">Next Steps</h3>
+        <div style="display:flex; flex-direction:column; gap:10px;">
+          <div class="card" style="padding:16px;">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <div style="width:32px; height:32px; border-radius:50%; background:var(--accent); display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:700; flex-shrink:0;">1</div>
+              <div>
+                <div style="font-weight:600; font-size:14px;">Architecture Decision</div>
+                <div style="font-size:12px; color:var(--text-dim);">Approve this architecture (you're here!)</div>
+              </div>
+            </div>
+          </div>
+          <div class="card" style="padding:16px;">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <div style="width:32px; height:32px; border-radius:50%; background:var(--card-border); display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:700; flex-shrink:0;">2</div>
+              <div>
+                <div style="font-weight:600; font-size:14px;">Data Pipeline</div>
+                <div style="font-size:12px; color:var(--text-dim);">Download, clean, unify 360K examples</div>
+              </div>
+            </div>
+          </div>
+          <div class="card" style="padding:16px;">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <div style="width:32px; height:32px; border-radius:50%; background:var(--card-border); display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:700; flex-shrink:0;">3</div>
+              <div>
+                <div style="font-weight:600; font-size:14px;">Model Implementation</div>
+                <div style="font-size:12px; color:var(--text-dim);">Build the architecture in PyTorch</div>
+              </div>
+            </div>
+          </div>
+          <div class="card" style="padding:16px;">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <div style="width:32px; height:32px; border-radius:50%; background:var(--card-border); display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:700; flex-shrink:0;">4</div>
+              <div>
+                <div style="font-weight:600; font-size:14px;">Training & Evaluation</div>
+                <div style="font-size:12px; color:var(--text-dim);">Train, evaluate against baselines, optimize</div>
+              </div>
+            </div>
+          </div>
+          <div class="card" style="padding:16px;">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <div style="width:32px; height:32px; border-radius:50%; background:var(--card-border); display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:700; flex-shrink:0;">5</div>
+              <div>
+                <div style="font-weight:600; font-size:14px;">ONNX Export & Deployment</div>
+                <div style="font-size:12px; color:var(--text-dim);">Quantize, benchmark, integrate into DataFog</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div><!-- end slides-wrapper -->
+
+<script>
+  let currentSlide = 0;
+  const slides = document.querySelectorAll('.slide');
+  const totalSlides = slides.length;
+  const progressBar = document.getElementById('progressBar');
+  const slideCounter = document.getElementById('slideCounter');
+  const sectionLabel = document.getElementById('sectionLabel');
+
+  function updateSlide(newIndex, direction) {
+    if (newIndex < 0 || newIndex >= totalSlides) return;
+
+    const oldSlide = slides[currentSlide];
+    const newSlide = slides[newIndex];
+
+    // Remove all transition classes
+    slides.forEach(s => {
+      s.classList.remove('active', 'exit-left');
+    });
+
+    // Animate out
+    if (direction === 'forward') {
+      oldSlide.classList.add('exit-left');
+    }
+
+    // Animate in
+    newSlide.classList.add('active');
+
+    currentSlide = newIndex;
+
+    // Update UI
+    progressBar.style.width = ((currentSlide / (totalSlides - 1)) * 100) + '%';
+    slideCounter.textContent = (currentSlide + 1) + ' / ' + totalSlides;
+    sectionLabel.textContent = newSlide.dataset.section || '';
+  }
+
+  function nextSlide() {
+    updateSlide(currentSlide + 1, 'forward');
+  }
+
+  function prevSlide() {
+    updateSlide(currentSlide - 1, 'backward');
+  }
+
+  function goToSlide(index) {
+    updateSlide(index, index > currentSlide ? 'forward' : 'backward');
+  }
+
+  // Keyboard navigation
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ') {
+      e.preventDefault();
+      nextSlide();
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      prevSlide();
+    }
+  });
+
+  // Touch navigation
+  let touchStartX = 0;
+  document.addEventListener('touchstart', (e) => {
+    touchStartX = e.changedTouches[0].screenX;
+  });
+  document.addEventListener('touchend', (e) => {
+    const diff = touchStartX - e.changedTouches[0].screenX;
+    if (Math.abs(diff) > 50) {
+      if (diff > 0) nextSlide();
+      else prevSlide();
+    }
+  });
+
+  // Initialize
+  slides[0].classList.add('active');
+  progressBar.style.width = '0%';
+  slideCounter.textContent = '1 / ' + totalSlides;
+</script>
+
+</body>
+</html>
