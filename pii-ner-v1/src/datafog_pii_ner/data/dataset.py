@@ -192,15 +192,11 @@ def load_single_dataset(
 
     token_col, tag_col = _detect_columns(raw)
 
-    # Check if tags are integers (need tag_names for conversion)
+    # Check if tags are ClassLabel integers (need tag_names for conversion)
     tag_names = None
-    if raw.features[tag_col].dtype == "int64" or hasattr(
-        raw.features[tag_col], "feature"
-    ):
-        if hasattr(raw.features[tag_col], "feature") and hasattr(
-            raw.features[tag_col].feature, "names"
-        ):
-            tag_names = raw.features[tag_col].feature.names
+    inner = getattr(raw.features[tag_col], "feature", None)
+    if inner is not None and hasattr(inner, "names"):
+        tag_names = inner.names
 
     def preprocess(example):
         tokens = example[token_col]
