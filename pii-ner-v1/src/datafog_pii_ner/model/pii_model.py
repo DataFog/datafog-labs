@@ -111,15 +111,15 @@ class PiiNerModel(DebertaV2PreTrainedModel):
             # Fallback: context only (e.g., if char_ids not available)
             fused = context_features
 
-        # Ensure consistent dtype (DeBERTa may output FP16 while head is FP32)
+        # CRF log-sum-exp is numerically unstable in FP16.
+        # Force FP32 and disable autocast so nn.Linear isn't recast to FP16.
         fused = fused.float()
-
-        # CRF classification
-        crf_output = self.crf_head(
-            hidden_states=fused,
-            labels=labels,
-            attention_mask=attention_mask,
-        )
+        with torch.amp.autocast(device_type=fused.device.type, enabled=False):
+            crf_output = self.crf_head(
+                hidden_states=fused,
+                labels=labels,
+                attention_mask=attention_mask,
+            )
 
         return PiiNerOutput(
             loss=crf_output.get("loss"),
