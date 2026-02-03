@@ -21,7 +21,34 @@ logger = logging.getLogger(__name__)
 
 
 class PiiTrainer(Trainer):
-    """Custom Trainer that extracts predictions from PiiNerOutput for metric computation."""
+    """Custom Trainer with differential learning rates and CRF-aware predictions.
+
+    Supports two parameter groups (backbone vs head) with separate learning rates.
+    Pass lr_backbone and lr_head via keyword arguments.
+    """
+
+    def __init__(self, *args, lr_backbone: float | None = None, lr_head: float | None = None, **kwargs):
+        self.lr_backbone = lr_backbone
+        self.lr_head = lr_head
+        super().__init__(*args, **kwargs)
+
+    def create_optimizer(self):
+        """Create AdamW with differential learning rates for backbone vs head."""
+        if self.lr_backbone is not None and self.lr_head is not None:
+            from torch.optim import AdamW
+
+            backbone_params = [p for n, p in self.model.named_parameters() if "deberta" in n and p.requires_grad]
+            head_params = [p for n, p in self.model.named_parameters() if "deberta" not in n and p.requires_grad]
+            self.optimizer = AdamW(
+                [
+                    {"params": backbone_params, "lr": self.lr_backbone},
+                    {"params": head_params, "lr": self.lr_head},
+                ],
+                weight_decay=self.args.weight_decay,
+            )
+        else:
+            super().create_optimizer()
+        return self.optimizer
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         outputs = model(**inputs)
@@ -118,19 +145,8 @@ def train(config_path: str = "configs/default.yaml"):
         remove_unused_columns=False,
     )
 
-    # Optimizer with differential learning rates
-    backbone_params = [p for n, p in model.named_parameters() if "deberta" in n]
-    head_params = [p for n, p in model.named_parameters() if "deberta" not in n]
-    optimizer_grouped = [
-        {"params": backbone_params, "lr": train_cfg["lr_backbone"]},
-        {"params": head_params, "lr": train_cfg["lr_head"]},
-    ]
-
-    from torch.optim import AdamW
-
-    optimizer = AdamW(optimizer_grouped, weight_decay=train_cfg["weight_decay"])
-
-    # Trainer
+    # Trainer — PiiTrainer handles differential learning rates internally
+    # via create_optimizer(), avoiding Accelerate gradient scaler issues
     trainer = PiiTrainer(
         model=model,
         args=training_args,
@@ -138,7 +154,8 @@ def train(config_path: str = "configs/default.yaml"):
         eval_dataset=datasets["validation"],
         data_collator=collator,
         compute_metrics=compute_metrics,
-        optimizers=(optimizer, None),
+        lr_backbone=train_cfg["lr_backbone"],
+        lr_head=train_cfg["lr_head"],
     )
 
     # Train

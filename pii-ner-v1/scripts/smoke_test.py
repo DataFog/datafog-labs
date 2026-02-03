@@ -12,7 +12,6 @@ import logging
 import sys
 
 import torch
-from torch.optim import AdamW
 from transformers import AutoTokenizer, TrainingArguments
 
 from datafog_pii_ner.data.collator import PiiDataCollator
@@ -64,6 +63,16 @@ def main():
     # Collator
     collator = PiiDataCollator(tokenizer=tokenizer, max_char_len=20)
 
+    # Auto-detect mixed precision: bf16 for A100+, fp16 for T4, none for CPU
+    use_bf16 = False
+    use_fp16 = False
+    if torch.cuda.is_available():
+        gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+        if gpu_mem >= 20:
+            use_bf16 = True
+        else:
+            use_fp16 = True
+
     # Training args — overfit mode with differential LRs
     training_args = TrainingArguments(
         output_dir="outputs/smoke_test",
@@ -74,7 +83,8 @@ def main():
         learning_rate=LR_BACKBONE,
         warmup_ratio=0.1,
         weight_decay=0.01,
-        fp16=torch.cuda.is_available(),
+        fp16=use_fp16,
+        bf16=use_bf16,
         eval_strategy="epoch",
         save_strategy="no",
         report_to="none",
@@ -83,24 +93,14 @@ def main():
         dataloader_num_workers=0,
     )
 
-    # Separate parameter groups: backbone vs head (CharCNN + gating + CRF)
-    backbone_params = [p for n, p in model.named_parameters() if "deberta" in n]
-    head_params = [p for n, p in model.named_parameters() if "deberta" not in n]
-    optimizer = AdamW(
-        [
-            {"params": backbone_params, "lr": LR_BACKBONE},
-            {"params": head_params, "lr": LR_HEAD},
-        ],
-        weight_decay=0.01,
-    )
-
     logger.info(
         f"Backbone LR: {LR_BACKBONE}, Head LR: {LR_HEAD} ({LR_HEAD / LR_BACKBONE:.0f}x)"
     )
-    logger.info(f"Backbone params: {sum(p.numel() for p in backbone_params):,}")
-    logger.info(f"Head params:     {sum(p.numel() for p in head_params):,}")
+    logger.info(f"Mixed precision: {'bf16' if use_bf16 else 'fp16' if use_fp16 else 'none'}")
 
-    # Use same data for train and eval (intentional overfitting)
+    # PiiTrainer handles differential learning rates internally via create_optimizer().
+    # This avoids passing a custom optimizer through optimizers=(), which bypasses
+    # Accelerate's optimizer wrapping and causes FP16/BF16 gradient scaler issues.
     trainer = PiiTrainer(
         model=model,
         args=training_args,
@@ -108,7 +108,8 @@ def main():
         eval_dataset=dataset,
         data_collator=collator,
         compute_metrics=compute_metrics,
-        optimizers=(optimizer, None),
+        lr_backbone=LR_BACKBONE,
+        lr_head=LR_HEAD,
     )
 
     # Train
