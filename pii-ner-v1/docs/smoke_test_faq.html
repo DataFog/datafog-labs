@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PII-NER Smoke Test — FAQ</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 48px 80px;
+    max-width: 960px;
+    margin: 0 auto;
+    line-height: 1.75;
+  }
+
+  h1 { font-size: 2.4em; font-weight: 700; color: #f8fafc; margin-bottom: 8px; }
+  .subtitle { font-size: 1.15em; color: #64748b; margin-bottom: 48px; }
+
+  .section-title {
+    font-size: 1.5em;
+    font-weight: 700;
+    color: #f8fafc;
+    margin-top: 56px;
+    margin-bottom: 24px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #1e293b;
+  }
+
+  .q {
+    font-size: 1.15em;
+    font-weight: 600;
+    color: #60a5fa;
+    margin-top: 36px;
+    margin-bottom: 12px;
+    padding-left: 24px;
+    position: relative;
+  }
+  .q::before {
+    content: "Q";
+    position: absolute;
+    left: 0;
+    font-weight: 800;
+    color: #3b82f6;
+  }
+
+  .a {
+    color: #cbd5e1;
+    font-size: 1.02em;
+    margin-bottom: 8px;
+    padding-left: 24px;
+  }
+  .a p { margin-bottom: 12px; }
+
+  .callout {
+    background: #1e293b;
+    border-left: 3px solid #3b82f6;
+    border-radius: 0 8px 8px 0;
+    padding: 14px 20px;
+    margin: 14px 0 14px 24px;
+    font-size: 0.95em;
+  }
+  .callout.warn {
+    border-left-color: #f97316;
+    background: #1c1207;
+  }
+  .callout.green {
+    border-left-color: #22c55e;
+    background: #052e16;
+  }
+  .callout.experiment {
+    border-left-color: #a78bfa;
+    background: #1a103d;
+  }
+
+  code {
+    background: #1e293b;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.9em;
+    color: #e2e8f0;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 14px 0 14px 24px;
+    font-size: 0.92em;
+    max-width: calc(100% - 24px);
+  }
+  th { background: #1e293b; padding: 8px 12px; text-align: left; border-bottom: 2px solid #334155; color: #94a3b8; font-weight: 600; }
+  td { padding: 8px 12px; border-bottom: 1px solid #1e293b; }
+
+  .highlight { color: #3b82f6; }
+  .green { color: #22c55e; }
+  .red { color: #ef4444; }
+  .orange { color: #f97316; }
+  .purple { color: #a78bfa; }
+  .dim { color: #64748b; }
+
+  .verdict {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 0.85em;
+  }
+  .verdict.good { background: #052e16; color: #22c55e; border: 1px solid #22c55e40; }
+  .verdict.ok { background: #422006; color: #f97316; border: 1px solid #f9731640; }
+  .verdict.try { background: #1a103d; color: #a78bfa; border: 1px solid #a78bfa40; }
+
+  .toc {
+    background: #1e293b;
+    border-radius: 8px;
+    padding: 20px 28px;
+    margin-bottom: 32px;
+  }
+  .toc h3 { color: #94a3b8; font-size: 1em; margin-bottom: 10px; }
+  .toc a { color: #60a5fa; text-decoration: none; display: block; padding: 3px 0; font-size: 0.95em; }
+  .toc a:hover { color: #93bbfd; }
+</style>
+</head>
+<body>
+
+<h1>Smoke Test FAQ</h1>
+<p class="subtitle">Pressure-testing every decision in the PII-NER model &mdash; what we chose, what we traded away, and what to try next.</p>
+
+<div class="toc">
+  <h3>Sections</h3>
+  <a href="#backbone">1. The Backbone (DeBERTa)</a>
+  <a href="#charcnn">2. The Character CNN</a>
+  <a href="#fusion">3. Gating Fusion</a>
+  <a href="#crf">4. The CRF Head</a>
+  <a href="#labels">5. Labels &amp; Tagging Scheme</a>
+  <a href="#training">6. Training Configuration</a>
+  <a href="#data">7. Data &amp; Sequence Length</a>
+  <a href="#numerical">8. Numerical Precision (FP16/FP32)</a>
+  <a href="#tuning">9. What to Tune First</a>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-title" id="backbone">1. The Backbone (DeBERTa)</div>
+
+<div class="q">Why DeBERTa and not regular BERT or RoBERTa?</div>
+<div class="a">
+  <p>DeBERTa v3 uses two tricks that matter for NER specifically. First, it has "disentangled attention" &mdash; it keeps track of what a token means and where it is in the sentence as two separate signals, then combines them. For NER, position matters a lot. "John" at the start of a sentence after "Dear" is probably a name. "John" after "St." is probably a street. DeBERTa is better at using that positional information than BERT.</p>
+  <p>Second, DeBERTa v3 uses a more efficient pretraining method (replaced token detection instead of masked language modeling), so smaller DeBERTa models punch above their weight compared to equivalently-sized BERT models.</p>
+  <div class="callout">
+    <strong>Concrete numbers:</strong> On CoNLL-2003 NER, DeBERTa v3-base gets ~93.5 F1 vs BERT-base at ~92.4 F1. That's a full point, which is a lot at that level. The xsmall variant we use is smaller than BERT-base but still competitive because of the better pretraining.
+  </div>
+</div>
+
+<div class="q">Why xsmall (70M params) instead of base (86M) or large (304M)?</div>
+<div class="a">
+  <p>Two reasons: inference speed and deployment cost. This model is meant to run in production scanning documents for PII. A larger model would be more accurate, but the cost scales roughly linearly with parameter count for inference. xsmall is about 4x faster than large at inference time.</p>
+  <p>The bet is that the CharCNN + CRF architecture compensates for some of the backbone's smaller size. The CharCNN catches structured patterns (SSN formats, email syntax) that even a large transformer struggles with, and the CRF enforces valid sequences that a bigger softmax head wouldn't.</p>
+  <div class="callout warn">
+    <strong>What we're giving up:</strong> Probably 1-2 F1 points on contextual entities like names and locations. DeBERTa-base has a 768-dim hidden size vs our 384, so it builds richer contextual representations. If recall on Tier 2 entities (PERSON, EMAIL) is underperforming in full training, upgrading to base is the single highest-impact change to try.
+  </div>
+  <div class="callout experiment">
+    <strong>Worth trying:</strong> Run the same smoke test with <code>microsoft/deberta-v3-base</code>. If F1 jumps noticeably on 100 examples, it's a sign xsmall is the bottleneck. If it's roughly the same, the head is doing its job and xsmall is fine.
+  </div>
+</div>
+
+<div class="q">Is 384 hidden dimensions enough to represent 163 different tags?</div>
+<div class="a">
+  <p>Yes, and it's not even close to the limit. Think of it this way: the final linear layer is <code>nn.Linear(384, 163)</code>. Each of the 163 tags gets a 384-dimensional "template" vector (one row of the weight matrix). The model asks: "which template does this token's representation look most like?" 384 dimensions is plenty of room for 163 templates to be distinct from each other.</p>
+  <p>The actual bottleneck isn't the final projection &mdash; it's whether the 384-dim representations from DeBERTa are <em>rich enough</em> to distinguish ambiguous entities. Can a 384-dim vector capture the difference between "May" the month and "May" the name? Probably yes, because the transformer encodes the surrounding context. But a 768-dim vector would capture it with more headroom.</p>
+</div>
+
+<div class="q">Should we freeze the backbone for the first few epochs?</div>
+<div class="a">
+  <p>We considered this. The idea is: train only the head for a few epochs so the CRF learns basic transition patterns, then unfreeze the backbone and fine-tune everything together. It's a valid strategy, but the warmup + differential LR approach achieves the same effect more smoothly.</p>
+  <p>With warmup_ratio=0.1, the backbone LR starts near zero and ramps up over the first 10% of training. So in practice, the backbone <em>is</em> nearly frozen for the first ~125 steps. The difference is that it's a gradual transition rather than a hard switch, which tends to train more stably.</p>
+  <div class="callout">
+    <strong>When freezing makes more sense:</strong> If you were using a much larger backbone (DeBERTa-large, 304M params) with very limited data. Freezing prevents the massive backbone from memorizing the small dataset before the head has learned anything useful. With 360K training examples, this isn't a concern for us.
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-title" id="charcnn">2. The Character CNN</div>
+
+<div class="q">DeBERTa already uses subword tokenization. Why do we need a character CNN on top?</div>
+<div class="a">
+  <p>Because subword tokenization actively destroys the patterns that identify structured PII.</p>
+  <p>Take an SSN: <code>555-12-3456</code>. A human sees "three digits, dash, two digits, dash, four digits" and immediately thinks SSN. But DeBERTa's SentencePiece tokenizer might split this into <code>["_555", "-12", "-34", "56"]</code>. Now the model sees four unrelated subword tokens. It can still learn that this sequence of tokens <em>tends to be</em> an SSN, but it has to learn that pattern from training data rather than recognizing the structural pattern directly.</p>
+  <p>The CharCNN looks at the raw characters of each token. It can learn a filter that activates on "digit-digit-digit-dash" regardless of how the tokenizer split things up. This is especially valuable for PII types with rigid formats: SSNs, credit cards, IBANs, IP addresses, phone numbers.</p>
+  <div class="callout">
+    <strong>How much does it help?</strong> In ablation studies on NER tasks, adding a character CNN to a transformer typically adds 0.3-0.8 F1 on standard benchmarks like CoNLL. But for PII-specific tasks with structured entities, the gain is likely larger because the structured patterns are exactly what CharCNN excels at. The only way to know for sure is to run an ablation: train once with CharCNN, once without, compare.
+  </div>
+</div>
+
+<div class="q">Why filter widths [3, 4, 5]? Would more widths help?</div>
+<div class="a">
+  <p>The widths [3, 4, 5] are the "classic" choice from Kim (2014) and Ma &amp; Hsieh (2016). They capture character n-grams of 3, 4, and 5 characters. This covers most of the patterns you'd care about:</p>
+  <table>
+    <tr><th>Width</th><th>What It Catches</th><th>Examples</th></tr>
+    <tr><td>3</td><td>Short patterns, digit runs</td><td><code>555</code>, <code>@gm</code>, <code>://</code></td></tr>
+    <tr><td>4</td><td>Medium patterns</td><td><code>mail</code>, <code>.com</code>, <code>-12-</code></td></tr>
+    <tr><td>5</td><td>Longer structural patterns</td><td><code>@gmai</code>, <code>XX-XX</code>, <code>https</code></td></tr>
+  </table>
+  <p>Adding a width-2 filter would catch character bigrams (individual letter transitions), which is occasionally useful. Adding width-6 or 7 would catch longer patterns but with diminishing returns since max_char_len is only 20. The max-pooling also means longer patterns can be captured as combinations of shorter ones.</p>
+  <div class="callout experiment">
+    <strong>Worth trying:</strong> Add a width-2 filter: <code>filter_widths=[2,3,4,5]</code>, <code>num_filters=[50,50,50,50]</code>. This adds 50 dimensions to the CharCNN output (200 total instead of 150). Cost is negligible. The width-2 filter might help with patterns like repeating digits or specific character pairs that signal PII boundaries.
+  </div>
+</div>
+
+<div class="q">Is 50 filters per width enough?</div>
+<div class="a">
+  <p>50 per width gives us 150 total features. That's 150 different character patterns the model can detect per token. For a model that's primarily relying on the 384-dim DeBERTa features and only using character features as supplementary signal, 150 is reasonable.</p>
+  <p>The question is whether 50 filters are enough to cover all the character patterns across 81 entity types. Some entity types share patterns (credit cards, IBANs, and phone numbers all involve digit sequences), so there's reuse. But 50 is toward the lower end of what papers typically use.</p>
+  <div class="callout experiment">
+    <strong>Worth trying:</strong> Bump to 100 filters per width (300 total). This doubles the CharCNN parameter count (~29K to ~58K), which is trivial relative to the 70M backbone. If structured PII types (Tier 1: SSN, credit cards) improve noticeably, the extra filters were needed.
+  </div>
+</div>
+
+<div class="q">Is max_char_len=20 enough? Emails and URLs can be long.</div>
+<div class="a">
+  <p>20 characters covers most tokens you'll encounter in normal text. The average English word is 5 characters. Even most email addresses, when split into tokens by the tokenizer, produce tokens shorter than 20 characters (e.g., <code>john.doe</code> = 8 chars, <code>@gmail.com</code> = 10 chars).</p>
+  <p>But there are edge cases. A long URL token might be 40+ characters. A complex password like <code>X7kq!mP2@wL9#nB</code> is 15 characters but close to the limit. Anything past 20 characters is simply truncated &mdash; the CharCNN never sees characters 21+.</p>
+  <div class="callout">
+    <strong>The tradeoff:</strong> max_char_len directly affects memory. The char_ids tensor is <code>(batch, seq_len, max_char_len)</code>. Going from 20 to 40 doubles the memory for that tensor. It also means the Conv1D operations run on longer sequences. For 20, the cost is negligible. For 40, still small but not zero.
+  </div>
+  <div class="callout experiment">
+    <strong>Worth trying:</strong> Bump to 30. Covers 99%+ of tokens in practice, modest memory increase. Only go to 40+ if you find the model is specifically failing on long-token entities.
+  </div>
+</div>
+
+<div class="q">char_embed_dim=50 &mdash; why 50?</div>
+<div class="a">
+  <p>50 is the standard value from the Ma &amp; Hsieh (2016) NER paper that popularized CharCNN for NER. It's been widely used since and works well in practice.</p>
+  <p>Here's the intuition: there are 256 possible byte values, and we're projecting them into a 50-dimensional space. That's a ~5x compression, which forces the model to learn that similar characters (digits, lowercase letters, uppercase letters, punctuation) should cluster together. If you made embed_dim too small (say 10), you wouldn't have enough room for meaningful clusters. Too large (say 200) and you're wasting capacity on a lookup table for 256 items.</p>
+  <p>50 is a sensible default. Changing it to 30 or 75 is unlikely to make a meaningful difference. This is not the parameter to tune first.</p>
+</div>
+
+<div class="q">Why byte-level (vocab_size=256) instead of Unicode-aware character encoding?</div>
+<div class="a">
+  <p>Simplicity. Every character in every language can be represented as a sequence of bytes. By using raw byte values, we avoid maintaining a separate character vocabulary, handling unknown characters, or worrying about Unicode normalization.</p>
+  <p>The downside: for non-ASCII text (Chinese, Arabic, accented characters), a single character might take 2-4 bytes in UTF-8. The model would see these as separate "characters," which is less natural than seeing them as single code points.</p>
+  <div class="callout">
+    <strong>For English PII, this doesn't matter.</strong> SSNs, credit cards, emails, phone numbers, IP addresses &mdash; they're all ASCII. Names with accents (like "Ren&eacute;") would represent the &eacute; as two bytes, but the model can learn that pattern. If you expand to multilingual PII detection, a Unicode-aware character vocabulary (say 8K-16K code points) would be worth investigating.
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-title" id="fusion">3. Gating Fusion</div>
+
+<div class="q">Why a learned gate instead of just concatenating char and context features?</div>
+<div class="a">
+  <p>Concatenation is the simpler approach: just stick the 150-dim char features and 384-dim context features together to get a 534-dim vector, then let the linear layer sort it out. This works, and many papers do it.</p>
+  <p>The gate adds something concatenation can't: <em>per-token, per-dimension control</em> over which signal to trust. For the token "555" in "SSN: 555-12-3456", the gate can go high (trust characters). For "John" in "My name is John", the gate can go low (trust context). Concatenation passes both signals equally and hopes the downstream classifier figures it out.</p>
+  <p>The practical difference is usually small (maybe 0.2-0.5 F1), but it matters more when your entity types span the full range from structured (SSN) to contextual (PERSON). That's exactly our case with 81 entity types.</p>
+  <div class="callout experiment">
+    <strong>Worth trying:</strong> Replace GatingFusion with simple concatenation + a linear projection as a baseline. If the gate version wins clearly on structured PII types (SSN, credit cards) but is similar on contextual types (PERSON, LOCATION), the gate is doing its job.
+  </div>
+</div>
+
+<div class="q">Could you use attention-based fusion instead?</div>
+<div class="a">
+  <p>Yes. Cross-attention fusion would let each context feature "attend" to the character features and vice versa. This is theoretically more expressive than a gate, which is just a scalar blend.</p>
+  <p>The tradeoff is complexity and parameter count. The gate is two linear layers (~352K params). A cross-attention fusion with a full attention head would be larger and slower, and for the relatively simple task of "blend two representations" it's probably overkill. The gate is the right level of complexity for this job.</p>
+  <p>If you wanted to go fancier, a more promising direction than cross-attention would be "biaffine fusion" (commonly used in dependency parsing), which models explicit interactions between char and context dimensions. But start with the gate.</p>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-title" id="crf">4. The CRF Head</div>
+
+<div class="q">Why CRF instead of a regular softmax classifier?</div>
+<div class="a">
+  <p>A softmax classifier predicts each token's tag independently. It looks at token 5, says "B-PERSON" with 80% confidence, moves on to token 6, says "I-EMAIL" with 70% confidence. Nobody checks whether B-PERSON followed by I-EMAIL is legal. It's not &mdash; you can't continue an EMAIL entity that was never started.</p>
+  <p>The CRF predicts the <em>entire sequence</em> jointly. It has a 163&times;163 transition matrix that scores every possible tag-to-tag transition. During training, it learns that <code>B-PERSON &rarr; I-PERSON</code> should have a high transition score and <code>B-PERSON &rarr; I-EMAIL</code> should be deeply negative. At inference, the Viterbi algorithm finds the globally best tag sequence, so it literally cannot produce invalid transitions.</p>
+  <div class="callout">
+    <strong>How much does it help?</strong> On standard NER benchmarks (CoNLL-2003 with 4 entity types), CRF adds about 0.2-0.5 F1 over softmax on top of a transformer. That's a modest but consistent gain. However, we have <strong>81 entity types</strong> (163 BIO tags), which means many more ways to produce illegal transitions. The CRF's advantage likely grows with the number of labels because there are more constraint violations for it to prevent. With only 4 types, a transformer can implicitly learn the transition patterns. With 81 types, explicit enforcement helps more.
+  </div>
+</div>
+
+<div class="q">The transition matrix is 163&times;163 = 26,569 parameters. Is that a lot? Does it scale badly?</div>
+<div class="a">
+  <p>26,569 parameters is tiny. The DeBERTa backbone has 70.7 million. The transition matrix is 0.04% of the model.</p>
+  <p>The computational cost is a different story. CRF training requires computing the "partition function" &mdash; summing over all possible tag sequences. The Viterbi algorithm and forward algorithm both run in O(T &times; N&sup2;) time, where T is sequence length and N is the number of tags. With N=163 and T=256, that's 163&sup2; &times; 256 &asymp; 6.8 million operations per example. That's significant but still fast on a GPU.</p>
+  <p>If you went to, say, 500 tags, the N&sup2; cost would start to hurt. At 163 it's fine.</p>
+</div>
+
+<div class="q">Does the CRF actually learn meaningful transitions, or is it just a constraint layer?</div>
+<div class="a">
+  <p>Both. It learns real patterns beyond just "don't follow B-PERSON with I-EMAIL." Some examples of what the transition matrix captures:</p>
+  <table>
+    <tr><th>From</th><th>To</th><th>Learned Score</th><th>Why</th></tr>
+    <tr><td>B-PERSON</td><td>I-PERSON</td><td class="green">High</td><td>Names are usually multi-token</td></tr>
+    <tr><td>B-SSN</td><td>I-SSN</td><td class="green">High</td><td>SSNs span multiple tokens</td></tr>
+    <tr><td>I-PERSON</td><td>O</td><td style="color: #94a3b8;">Medium</td><td>Names end eventually</td></tr>
+    <tr><td>O</td><td>I-PERSON</td><td class="red">Low</td><td>Can't continue a name that wasn't started</td></tr>
+    <tr><td>B-EMAIL</td><td>I-SSN</td><td class="red">Very low</td><td>Illegal cross-type transition</td></tr>
+    <tr><td>O</td><td>O</td><td class="green">High</td><td>Most tokens are not entities</td></tr>
+  </table>
+  <p>It also learns <em>base rates</em>. The transition from the start-of-sequence to O is very high because most sequences start with non-entity tokens. These priors are baked into the transition matrix and supplement the emission scores from the linear layer.</p>
+</div>
+
+<div class="q">The CRF loss was in the hundreds early in training but the model was "learning." What was it learning?</div>
+<div class="a">
+  <p>Think of CRF training in two phases:</p>
+  <p><strong>Phase 1 (epochs 1-11): Learning the "grammar"</strong> &mdash; The transition matrix is learning which tag sequences are legal and which are garbage. It's figuring out that O&rarr;O is common, that B-X&rarr;I-X is valid, and that random cross-type transitions should be penalized. During this phase, the model predicts all-O because O is the safest tag (85-90% of tokens <em>are</em> O), and the transition matrix hasn't yet learned enough to confidently emit B-tags. Loss drops from 300+ to ~40, but F1 stays at zero.</p>
+  <p><strong>Phase 2 (epoch 12+): Using the grammar</strong> &mdash; Once the transition scores for valid patterns (B-PERSON&rarr;I-PERSON) are high enough relative to the all-O baseline, the CRF starts emitting entity tags. F1 jumps from 0 to 0.01 at epoch 12, then climbs rapidly because the "grammar" is already learned and the model just needs to refine emission scores.</p>
+  <div class="callout">
+    <strong>This is characteristic of CRF training.</strong> There's a "phase transition" where metrics go from zero to non-zero suddenly. It looks like nothing is happening, then everything happens at once. With a softmax head you'd see gradual improvement from epoch 1 because individual token predictions can be partially correct. With CRF, seqeval requires exact boundary matches, so it's all-or-nothing.
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-title" id="labels">5. Labels &amp; Tagging Scheme</div>
+
+<div class="q">We use BIO tagging. Would BIOES (also called BILOU) be better?</div>
+<div class="a">
+  <p>BIOES adds two more tag prefixes: E (End of entity) and S (Single-token entity). So "John Smith" would be <code>B-PERSON E-PERSON</code> instead of <code>B-PERSON I-PERSON</code>, and standalone "Paris" would be <code>S-LOCATION</code> instead of <code>B-LOCATION</code>.</p>
+  <p>The argument for BIOES: it encodes entity boundaries more explicitly. The model doesn't have to figure out where an entity ends &mdash; the E tag tells it directly. In older BiLSTM-CRF papers, BIOES consistently outperformed BIO by about 0.3-0.8 F1.</p>
+  <p>The argument against: with 81 entity types, BIOES gives us <code>1 + (81 &times; 4) = 325</code> tags instead of 163. The CRF transition matrix becomes 325&times;325 = 105,625 parameters (4x larger), and the Viterbi decode is 4x slower. With modern transformers that already capture context well, the BIOES advantage is smaller than it was with BiLSTMs.</p>
+  <div class="callout">
+    <strong>Our call:</strong> BIO with CRF is a solid middle ground. The CRF already enforces valid boundaries, which is the main thing BIOES provides. Going to BIOES would double label count and slow down training/inference for a gain that's likely under 0.5 F1 with a transformer backbone.
+  </div>
+  <div class="callout experiment">
+    <strong>Worth trying if:</strong> You see boundary errors in evaluation &mdash; the model correctly identifies that an entity exists but gets the start or end token wrong. That's the specific failure mode BIOES helps with. If most errors are entity type confusion (calling a LOCATION a PERSON), BIOES won't help.
+  </div>
+</div>
+
+<div class="q">81 entity types seems like a lot. Are some too rare to learn well?</div>
+<div class="a">
+  <p>Almost certainly yes. In the ai4privacy dataset, entity types follow a long-tail distribution. PERSON, EMAIL, and LOCATION might have tens of thousands of examples each. CRYPTO_WALLET, GENETIC_DATA, and TRADE_UNION might have a few hundred or even fewer.</p>
+  <p>The model will struggle with rare types. If CRYPTO_WALLET appears only 200 times in 360K examples, the model has very few positive examples to learn from, while seeing millions of non-entity tokens.</p>
+  <div class="callout warn">
+    <strong>What to watch:</strong> After full training, check per-type recall. If any Tier 1 or Tier 2 type has recall below target, you need to either: (a) oversample that type during training, (b) add synthetic training data for it, or (c) consider merging very rare types into broader categories.
+  </div>
+  <p>The 4-tier system is designed with this in mind. Tier 4 has a relaxed target of 0.85 recall because those types are rarer and harder. The tiers focus evaluation attention on the types that matter most.</p>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-title" id="training">6. Training Configuration</div>
+
+<div class="q">Why differential learning rates and not layer-wise learning rate decay (LLRD)?</div>
+<div class="a">
+  <p>LLRD is a technique where each transformer layer gets a progressively smaller learning rate. Layer 12 (closest to the output) might use 2e-5, layer 11 uses 2e-5 &times; 0.95, layer 10 uses 2e-5 &times; 0.95&sup2;, and so on. The idea is that lower layers learn more general features that shouldn't change much, while upper layers learn more task-specific features that should adapt more.</p>
+  <p>Our approach is simpler: one LR for everything in DeBERTa (2e-5), one LR for everything in the head (1e-3). Two groups instead of 12+.</p>
+  <div class="callout">
+    <strong>The tradeoff:</strong> LLRD is more fine-grained and generally gives a small improvement (0.1-0.3 F1 on NER tasks in published results). But it adds a hyperparameter (the decay factor, typically 0.9-0.95) and makes the optimizer setup more complex. For a smoke test and initial training, the 2-group approach is simpler and gets you 95% of the benefit. LLRD is a good thing to try once the basic model is working.
+  </div>
+  <div class="callout experiment">
+    <strong>To implement LLRD:</strong> Instead of splitting parameters by "deberta" vs not, you'd iterate over <code>model.deberta.encoder.layer</code> and assign each layer a decayed LR. The head still gets 1e-3. A decay factor of 0.95 with base LR 2e-5 means layer 1 gets ~1.2e-5 and layer 12 gets 2e-5. This is a straightforward change to the optimizer setup in the training cell.
+  </div>
+</div>
+
+<div class="q">Is the 50x ratio between head LR and backbone LR optimal?</div>
+<div class="a">
+  <p>50x (1e-3 / 2e-5) is on the higher end of typical ratios. For standard NER with a softmax head, people usually use 5-10x (e.g., backbone 2e-5, head 1e-4 or 2e-4).</p>
+  <p>We use a higher ratio because the CRF head has more work to do than a simple softmax head. It needs to learn a 163&times;163 transition matrix from scratch, plus character CNN patterns, plus the gating mechanism. All of these are randomly initialized and need to move fast. At a lower head LR (say 1e-4), the CRF takes many more epochs to escape the "all-O" trap, which we saw in Run 1.</p>
+  <div class="callout">
+    <strong>What if 50x is too aggressive?</strong> If you see the head overfitting before the backbone has fully adapted (training loss drops to near-zero but validation loss plateaus), the head LR might be too high. For full training on 360K examples, you might want to try head LR of 5e-4 (25x ratio) and see if it generalizes better.
+  </div>
+  <table>
+    <tr><th>Ratio</th><th>Head LR</th><th>When to Use</th></tr>
+    <tr><td>10x</td><td>2e-4</td><td>Simple softmax head, few labels</td></tr>
+    <tr><td>25x</td><td>5e-4</td><td>CRF head with moderate label count</td></tr>
+    <tr><td>50x</td><td>1e-3</td><td>CRF + CharCNN, many labels, smoke test (need fast convergence)</td></tr>
+    <tr><td>100x</td><td>2e-3</td><td>Probably too aggressive; risk of head instability</td></tr>
+  </table>
+</div>
+
+<div class="q">Why AdamW? Would a different optimizer help?</div>
+<div class="a">
+  <p>AdamW is the de facto standard for transformer fine-tuning. It combines Adam's adaptive learning rates with decoupled weight decay. Virtually all recent NER papers use it.</p>
+  <p>Other options:</p>
+  <table>
+    <tr><th>Optimizer</th><th>Verdict</th><th>Why</th></tr>
+    <tr><td>SGD</td><td><span class="verdict ok">Not recommended</span></td><td>Much slower convergence for transformers. You'd need 10x the epochs.</td></tr>
+    <tr><td>Adam (not W)</td><td><span class="verdict ok">Slightly worse</span></td><td>Weight decay is coupled with gradient, which causes regularization issues. AdamW fixes this.</td></tr>
+    <tr><td>AdaFactor</td><td><span class="verdict try">Worth trying</span></td><td>Uses less memory (no second moment estimate). Useful if you upgrade to a larger backbone and memory is tight.</td></tr>
+    <tr><td>LAMB / LARS</td><td><span class="verdict ok">Not needed</span></td><td>Designed for very large batch sizes (1000+). Overkill for batch size 16.</td></tr>
+  </table>
+  <p>Sticking with AdamW is the right call. It's well-understood, well-tested, and compatible with HuggingFace's learning rate schedulers.</p>
+</div>
+
+<div class="q">Is effective batch size 16 the right choice?</div>
+<div class="a">
+  <p>For NER fine-tuning, effective batch sizes of 16-32 are standard. The batch size affects two things:</p>
+  <p><strong>Gradient noise:</strong> Smaller batches have noisier gradients, which can actually help escape local minima (like the all-O trap) but make training less stable. Larger batches have smoother gradients and converge more predictably.</p>
+  <p><strong>CRF interaction:</strong> The CRF loss is computed per-sequence and averaged. With batch size 16, you're averaging over 16 sequences. Sequences with many entities contribute more to the loss than sequences with few entities. If the batch is too small, the gradient is dominated by whichever examples happen to be in that batch.</p>
+  <div class="callout">
+    <strong>Our setup:</strong> 4 per device &times; 4 accumulation steps = 16 effective. This is driven by the T4's 16GB VRAM constraint (can't fit more than 4 examples of seq_len 256 with DeBERTa). The accumulation gets us to a reasonable effective batch size without requiring more memory.
+  </div>
+  <div class="callout experiment">
+    <strong>For full training:</strong> If using a GPU with more memory (A100 with 40/80GB), try per_device_batch_size=8 or 16 with accumulation=2, for effective batch size 16-32. Larger effective batch sizes up to 32 can slightly improve final F1 on NER.
+  </div>
+</div>
+
+<div class="q">Is warmup_ratio=0.1 right?</div>
+<div class="a">
+  <p>0.1 (10% of total training steps) is standard for transformer fine-tuning. The DeBERTa paper uses it. BERT's original paper used a fixed number of warmup steps, but ratio-based is more convenient because it adapts to your dataset size and epoch count.</p>
+  <p>What warmup does: for the first 10% of steps, the learning rate starts at zero and linearly increases to the target. This prevents destructive updates to the pretrained weights in the first few steps when the randomly initialized head is producing garbage gradients.</p>
+  <div class="callout">
+    <strong>When to change it:</strong> If you see a loss spike in the first few epochs (loss shoots up, then recovers), warmup might be too short. Try 0.15 or 0.2. If training seems to "waste" early epochs making no progress, warmup might be too long. For most NER tasks, 0.1 is fine.
+  </div>
+</div>
+
+<div class="q">Is weight_decay=0.01 right? Should backbone and head have different values?</div>
+<div class="a">
+  <p>0.01 is the standard value from the BERT and DeBERTa papers. Weight decay acts as L2 regularization, preventing weights from growing too large. It's applied to all parameters except biases and layer norm weights (AdamW and HuggingFace handle this automatically).</p>
+  <p>In our setup, the same 0.01 applies to both backbone and head parameter groups. This is fine for the backbone but may be slightly too aggressive for the head, which is learning from scratch and needs its weights to grow initially. In practice, the high head LR (1e-3) overwhelms the 0.01 decay, so it doesn't matter much.</p>
+  <div class="callout">
+    <strong>An option for full training:</strong> Set weight decay to 0 for the head parameter group. This lets the CRF transition matrix and CharCNN filters grow freely without regularization. Whether this helps depends on whether the head overfits &mdash; which you'll see in the gap between training and validation loss.
+  </div>
+</div>
+
+<div class="q">50 epochs for the smoke test, 10 for full training. How do these relate?</div>
+<div class="a">
+  <p>They serve completely different purposes:</p>
+  <table>
+    <tr><th></th><th>Smoke Test</th><th>Full Training</th></tr>
+    <tr><td><strong>Goal</strong></td><td>Prove the model can learn</td><td>Generalize to unseen data</td></tr>
+    <tr><td><strong>Data</strong></td><td>100 examples</td><td>~290K train (360K minus val/test)</td></tr>
+    <tr><td><strong>Epochs</strong></td><td>50</td><td>10</td></tr>
+    <tr><td><strong>Total examples seen</strong></td><td>5,000</td><td>2,900,000</td></tr>
+    <tr><td><strong>Eval on</strong></td><td>Training data (intentional)</td><td>Held-out validation set</td></tr>
+    <tr><td><strong>Overfit?</strong></td><td>Yes, that's the point</td><td>No, that would be bad</td></tr>
+  </table>
+  <p>50 epochs on 100 examples is fast (~8 min) and gives the randomly initialized head enough iterations to learn the transition matrix. 10 epochs on 290K examples is roughly 580x more gradient updates, which is plenty for fine-tuning a pretrained model.</p>
+  <div class="callout experiment">
+    <strong>For full training:</strong> Use early stopping. Monitor validation F1 every epoch; stop if it doesn't improve for 3 consecutive epochs. You might converge in 6-7 epochs rather than 10. Or you might want 12-15 if the CRF takes longer to settle with the full label distribution.
+  </div>
+</div>
+
+<div class="q">Does label smoothing work with CRF?</div>
+<div class="a">
+  <p>Standard label smoothing (mixing the one-hot target with a uniform distribution) doesn't directly apply to CRF loss. CRF loss is a negative log-likelihood over sequences, not a per-token cross-entropy. You'd need to modify the partition function to account for smoothed targets, which is non-trivial.</p>
+  <p>That said, the CRF naturally provides a form of "soft" training because the loss considers all possible sequences, not just the argmax. The partition function already distributes probability mass across alternative tag sequences. So CRF training is already less "sharp" than per-token cross-entropy with hard labels.</p>
+  <div class="callout">
+    <strong>Bottom line:</strong> Don't try to add label smoothing to the CRF loss. If you want a regularization effect, use dropout (we do, at 0.1) or weight decay (we do, at 0.01). These are simpler and well-understood with CRF.
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-title" id="data">7. Data &amp; Sequence Length</div>
+
+<div class="q">max_seq_len=256 &mdash; are we losing PII by truncating?</div>
+<div class="a">
+  <p>Yes, potentially. If a document is 400 tokens long and an SSN appears at position 350, we'll never see it because we truncate at 256. This is a real concern for production use.</p>
+  <p>The tradeoff is memory and speed. DeBERTa's self-attention is O(n&sup2;) in sequence length. Doubling from 256 to 512 means 4x the attention computation and 4x the memory for attention matrices. On a T4 with 16GB, you'd need to halve the batch size.</p>
+  <table>
+    <tr><th>max_seq_len</th><th>Attention cost</th><th>Batch size on T4</th><th>Coverage</th></tr>
+    <tr><td>128</td><td>1x</td><td>8-16</td><td>Short texts only. Missing a lot.</td></tr>
+    <tr><td>256</td><td>4x</td><td>4</td><td>Covers most paragraphs and short docs.</td></tr>
+    <tr><td>512</td><td>16x</td><td>1-2</td><td>Covers most documents. Standard for BERT.</td></tr>
+    <tr><td>1024</td><td>64x</td><td>OOM on T4</td><td>Long documents. Need A100.</td></tr>
+  </table>
+  <div class="callout">
+    <strong>The production solution:</strong> Use a sliding window at inference time. Split long documents into overlapping 256-token chunks (e.g., stride of 128), run the model on each chunk, and merge predictions. This way you train on 256-token chunks but can handle arbitrarily long documents. The overlap ensures entities at chunk boundaries aren't missed.
+  </div>
+  <div class="callout experiment">
+    <strong>For full training:</strong> If most of your training data is under 256 tokens, keep it at 256 for speed. If you have a lot of longer documents in the training set, try 384 or 512 with a smaller batch size and more gradient accumulation steps to compensate.
+  </div>
+</div>
+
+<div class="q">We only used ai4privacy for the smoke test. Should we have used all 3 datasets?</div>
+<div class="a">
+  <p>For the smoke test, using one dataset is fine. The smoke test asks "is the model wired correctly?" not "does it generalize across datasets?" If the model can overfit 100 examples from one dataset, the architecture works. Adding more datasets would just slow down the test without changing the answer.</p>
+  <p>For full training, using all three datasets (ai4privacy, Nemotron-PII, Gretel) is important. Each dataset has different annotation conventions, entity distributions, and text styles. Training on all three forces the model to generalize rather than memorize one dataset's quirks.</p>
+  <div class="callout warn">
+    <strong>Watch out for label conflicts.</strong> Different datasets might annotate the same entity differently. ai4privacy might label "New York" as two tokens (B-LOCATION, I-LOCATION) while Gretel labels it as one token (B-LOCATION) because they pre-joined it. The label normalization in <code>label_schema.py</code> handles type mapping (FIRSTNAME &rarr; PERSON), but boundary conventions can still differ. Check the per-dataset F1 after full training to catch these issues.
+  </div>
+</div>
+
+<div class="q">100 examples for the smoke test &mdash; is that the right number?</div>
+<div class="a">
+  <p>100 is a sweet spot. Here's why:</p>
+  <ul>
+    <li><strong>Too few (10-20):</strong> Not enough entity diversity. You might not see any examples of SSN or IBAN in 10 examples, so you can't tell if the model handles those types.</li>
+    <li><strong>Too many (1000+):</strong> Takes too long to overfit. The whole point of a smoke test is speed. 1000 examples on 50 epochs would take an hour instead of 8 minutes.</li>
+    <li><strong>100:</strong> Gives you at least a few examples of most common entity types, and can be memorized in 50 epochs in under 10 minutes. Good balance.</li>
+  </ul>
+  <p>Even with 100, rare entity types (IBAN, CRYPTO_WALLET) might not appear at all. That's expected. The smoke test validates the architecture, not coverage of every type.</p>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-title" id="numerical">8. Numerical Precision (FP16/FP32)</div>
+
+<div class="q">Why do we need to cast to FP32 for the CRF? What breaks in FP16?</div>
+<div class="a">
+  <p>The CRF's forward algorithm computes the "partition function" using log-sum-exp over all possible tag sequences. This involves:</p>
+  <ol style="padding-left: 48px; margin: 12px 0;">
+    <li style="margin-bottom: 8px;">Exponentiating emission scores (which can be large positive or negative numbers)</li>
+    <li style="margin-bottom: 8px;">Summing these exponentials across 163 tag options at each position</li>
+    <li style="margin-bottom: 8px;">Taking the log of the sum</li>
+    <li style="margin-bottom: 8px;">Repeating this for every position in the sequence (up to 256 times)</li>
+  </ol>
+  <p>FP16 has a maximum representable value of ~65,504. After a few iterations of exp &rarr; sum &rarr; log &rarr; add, it's easy to exceed this and get <code>inf</code>. Once any value goes to <code>inf</code>, the gradients become NaN, and training collapses.</p>
+  <p>FP32's max is ~3.4 &times; 10<sup>38</sup>, which is effectively impossible to exceed with log-sum-exp accumulations.</p>
+  <div class="callout">
+    <strong>Our solution (two lines):</strong><br>
+    <code>fused = fused.float()</code> &mdash; casts the input tensor to FP32<br>
+    <code>with torch.amp.autocast(..., enabled=False):</code> &mdash; prevents PyTorch's auto-mixed-precision from casting the CRF's linear layer back to FP16<br><br>
+    The rest of the model (DeBERTa, CharCNN, GatingFusion) runs happily in FP16. Only the CRF head needs FP32. This gives us the speed benefit of FP16 for the expensive transformer while keeping the CRF stable.
+  </div>
+</div>
+
+<div class="q">Could we use BF16 instead of FP16+FP32?</div>
+<div class="a">
+  <p>BF16 (bfloat16) has the same exponent range as FP32 (max ~3.4 &times; 10<sup>38</sup>) but with reduced precision (8 mantissa bits vs 23). This means it won't overflow during log-sum-exp, solving the CRF instability without the FP32 cast.</p>
+  <p>The catch: BF16 requires Ampere or newer GPUs (A100, A10, RTX 3090+). The T4 (Turing architecture) does not support BF16. Since the smoke test targets T4, we use FP16+FP32 for compatibility.</p>
+  <div class="callout experiment">
+    <strong>For full training on A100:</strong> Try <code>bf16=True</code> instead of <code>fp16=True</code> and remove the FP32 cast. This is simpler and slightly faster because there's no precision mismatch. Check that eval loss matches the FP16+FP32 baseline to confirm nothing changed.
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-title" id="tuning">9. What to Tune First</div>
+
+<div class="q">If I could only change 3 things to improve the model, what should they be?</div>
+<div class="a">
+  <p>In priority order:</p>
+
+  <div class="callout green" style="margin-bottom: 16px;">
+    <strong>1. Backbone size: try DeBERTa v3-base (86M, 768-dim)</strong><br>
+    This is the single biggest lever. Going from 384 to 768 hidden dimensions gives the model much richer contextual representations. It roughly doubles inference cost, but for PII detection where accuracy matters more than speed, it's usually worth it. Expected gain: 1-3 F1 points on contextual entities (PERSON, LOCATION, ORGANIZATION).
+  </div>
+
+  <div class="callout green" style="margin-bottom: 16px;">
+    <strong>2. Layer-wise learning rate decay (LLRD)</strong><br>
+    Replace the 2-group optimizer with per-layer LRs (decay factor 0.9-0.95). This preserves lower-layer general features while letting upper layers adapt more. Expected gain: 0.3-0.8 F1 points. Low effort to implement, no inference cost.
+  </div>
+
+  <div class="callout green">
+    <strong>3. max_seq_len: increase to 384 or 512</strong><br>
+    More context helps the model resolve ambiguous entities and catches PII that appears later in documents. Expected gain: depends on your data distribution. If most training texts are under 256 tokens, minimal gain. If many are longer, potentially significant.
+  </div>
+
+  <p style="margin-top: 16px; color: #94a3b8; font-size: 0.95em;">After these three, the next tier would be: CharCNN filter count (50&rarr;100), adding a width-2 filter, and tuning the head-to-backbone LR ratio for full training.</p>
+</div>
+
+<div class="q">What should I look at in the evaluation results to decide what to tune?</div>
+<div class="a">
+  <p>After full training, look at these signals:</p>
+  <table>
+    <tr><th>Signal</th><th>What It Means</th><th>What to Tune</th></tr>
+    <tr>
+      <td>Low recall on <strong>structured</strong> PII<br>(SSN, credit card, IBAN)</td>
+      <td>CharCNN isn't capturing patterns well enough</td>
+      <td>More filters, wider filter widths, increase max_char_len</td>
+    </tr>
+    <tr>
+      <td>Low recall on <strong>contextual</strong> PII<br>(PERSON, LOCATION)</td>
+      <td>DeBERTa representations not rich enough</td>
+      <td>Larger backbone (base/large), LLRD, longer sequences</td>
+    </tr>
+    <tr>
+      <td>High precision but low recall<br>(model is conservative)</td>
+      <td>CRF transition matrix biases toward O tags</td>
+      <td>Higher head LR, more epochs, check class imbalance</td>
+    </tr>
+    <tr>
+      <td>Low precision but high recall<br>(too many false positives)</td>
+      <td>Model is over-predicting entities</td>
+      <td>More weight decay, lower head LR, more training data</td>
+    </tr>
+    <tr>
+      <td>Train F1 >> Val F1<br>(big gap)</td>
+      <td>Overfitting</td>
+      <td>More dropout, more weight decay, early stopping, more data</td>
+    </tr>
+    <tr>
+      <td>Train F1 &asymp; Val F1 but both low</td>
+      <td>Underfitting</td>
+      <td>Larger model, higher LR, more epochs, less regularization</td>
+    </tr>
+    <tr>
+      <td>One tier is much worse than others</td>
+      <td>Data imbalance for those entity types</td>
+      <td>Oversample rare types, add synthetic data, focal loss</td>
+    </tr>
+  </table>
+</div>
+
+<div class="q">Is there anything fundamentally wrong with this architecture that we should rethink?</div>
+<div class="a">
+  <p>No. DeBERTa + CharCNN + CRF is a well-proven architecture for NER. Each component has clear motivation:</p>
+  <ul>
+    <li>DeBERTa gives you strong contextual understanding from pretraining</li>
+    <li>CharCNN adds pattern recognition for structured entities that subword tokenization obscures</li>
+    <li>Gating fusion lets the model dynamically choose which signal to trust per token</li>
+    <li>CRF enforces valid BIO sequences, which matters more with 81 entity types than with 4</li>
+  </ul>
+  <p>The one thing to keep an eye on is whether the CharCNN + GatingFusion adds enough value to justify the added complexity. After full training, run an ablation: train the same model but without the CharCNN (set <code>char_ids=None</code> so the forward pass uses context features only). If the CharCNN model wins by 0.5+ F1 on structured PII types, keep it. If the gap is tiny, you could simplify to DeBERTa + CRF and save some complexity.</p>
+  <div class="callout">
+    <strong>The architecture is not the bottleneck right now.</strong> The smoke test proved it works. The next wins will come from data (more examples, better label quality, oversampling rare types) and training config (LLRD, longer sequences, early stopping) rather than architectural changes.
+  </div>
+</div>
+
+<p style="margin-top: 56px; padding-top: 24px; border-top: 1px solid #1e293b; color: #475569; font-size: 0.9em; text-align: center;">
+  DataFog PII-NER v1 &mdash; Smoke Test FAQ &mdash; Last updated after passing smoke test run (F1 0.992, eval loss 0.288)
+</p>
+
+</body>
+</html>

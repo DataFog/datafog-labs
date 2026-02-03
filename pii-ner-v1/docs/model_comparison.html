@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Why Build Our Own? — DataFog PII-NER v1 vs SpaCy vs GLiNER 2</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 48px 80px;
+    max-width: 1000px;
+    margin: 0 auto;
+    line-height: 1.75;
+  }
+
+  h1 { font-size: 2.4em; font-weight: 700; color: #f8fafc; margin-bottom: 8px; }
+  .subtitle { font-size: 1.15em; color: #64748b; margin-bottom: 48px; }
+
+  .section-title {
+    font-size: 1.5em;
+    font-weight: 700;
+    color: #f8fafc;
+    margin-top: 56px;
+    margin-bottom: 24px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #1e293b;
+  }
+
+  .q {
+    font-size: 1.15em;
+    font-weight: 600;
+    color: #60a5fa;
+    margin-top: 36px;
+    margin-bottom: 12px;
+    padding-left: 24px;
+    position: relative;
+  }
+  .q::before {
+    content: "Q";
+    position: absolute;
+    left: 0;
+    font-weight: 800;
+    color: #3b82f6;
+  }
+
+  .a {
+    color: #cbd5e1;
+    font-size: 1.02em;
+    margin-bottom: 8px;
+    padding-left: 24px;
+  }
+  .a p { margin-bottom: 12px; }
+
+  .callout {
+    background: #1e293b;
+    border-left: 3px solid #3b82f6;
+    border-radius: 0 8px 8px 0;
+    padding: 14px 20px;
+    margin: 14px 0 14px 24px;
+    font-size: 0.95em;
+  }
+  .callout.warn {
+    border-left-color: #f97316;
+    background: #1c1207;
+  }
+  .callout.green {
+    border-left-color: #22c55e;
+    background: #052e16;
+  }
+  .callout.red {
+    border-left-color: #ef4444;
+    background: #2a0a0a;
+  }
+
+  code {
+    background: #1e293b;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.9em;
+    color: #e2e8f0;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 14px 0 14px 24px;
+    font-size: 0.92em;
+    max-width: calc(100% - 24px);
+  }
+  th { background: #1e293b; padding: 8px 12px; text-align: left; border-bottom: 2px solid #334155; color: #94a3b8; font-weight: 600; }
+  td { padding: 8px 12px; border-bottom: 1px solid #1e293b; }
+  tr:hover { background: #1e293b40; }
+
+  .highlight { color: #3b82f6; }
+  .green { color: #22c55e; }
+  .red { color: #ef4444; }
+  .orange { color: #f97316; }
+  .purple { color: #a78bfa; }
+  .dim { color: #64748b; }
+
+  .toc {
+    background: #1e293b;
+    border-radius: 8px;
+    padding: 20px 28px;
+    margin-bottom: 32px;
+  }
+  .toc h3 { color: #94a3b8; font-size: 1em; margin-bottom: 10px; }
+  .toc a { color: #60a5fa; text-decoration: none; display: block; padding: 3px 0; font-size: 0.95em; }
+  .toc a:hover { color: #93bbfd; }
+
+  .model-tag {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 0.82em;
+    margin-right: 4px;
+  }
+  .tag-spacy { background: #09251a; color: #22c55e; border: 1px solid #22c55e40; }
+  .tag-gliner { background: #1a103d; color: #a78bfa; border: 1px solid #a78bfa40; }
+  .tag-datafog { background: #172554; color: #60a5fa; border: 1px solid #60a5fa40; }
+
+  .vs-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+    margin: 16px 0 16px 24px;
+  }
+  .vs-card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 16px 20px;
+  }
+  .vs-card h4 { font-size: 1em; margin-bottom: 8px; }
+  .vs-card p { font-size: 0.9em; color: #94a3b8; }
+
+  .score-bar {
+    height: 8px;
+    border-radius: 4px;
+    margin: 4px 0 8px 0;
+  }
+</style>
+</head>
+<body>
+
+<h1>Why Build Our Own Model?</h1>
+<p class="subtitle">A critical, honest comparison of DataFog PII-NER v1 against SpaCy and GLiNER 2 &mdash;<br>where we win, where we don't, and why this is still worth doing.</p>
+
+<div class="toc">
+  <h3>Sections</h3>
+  <a href="#tldr">0. The 30-Second Version</a>
+  <a href="#what">1. What Are These Three Models?</a>
+  <a href="#scorecard">2. The Scorecard</a>
+  <a href="#pii">3. PII Coverage: Who Can Find What?</a>
+  <a href="#accuracy">4. Accuracy: How Good Is Each One?</a>
+  <a href="#data">5. Training Data: What Did They Actually Train On?</a>
+  <a href="#speed">6. Speed &amp; Size: What Does Deployment Look Like?</a>
+  <a href="#architecture">7. Architectural Tradeoffs</a>
+  <a href="#honest">8. The Honest Case Against Building Our Own</a>
+  <a href="#case-for">9. The Case For Building Our Own</a>
+  <a href="#prove">10. What We Need to Prove</a>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-title" id="tldr">0. The 30-Second Version</div>
+
+<div class="a">
+  <p><span class="model-tag tag-spacy">SpaCy</span> is fast and cheap but can only find about 7 out of 81 PII types. It needs regex bolted on for everything else. Good baseline, not a real PII solution on its own.</p>
+  <p><span class="model-tag tag-gliner">GLiNER 2</span> is flexible and can find any entity type you describe, without retraining. But it's 9x larger, 5-8x slower, degrades past 30 entity types, and has no character-level features for structured PII like SSNs.</p>
+  <p><span class="model-tag tag-datafog">DataFog v1</span> is purpose-built for PII. Smaller, faster, with character-level pattern detection and CRF sequence constraints. But it's unproven &mdash; the smoke test passed, but full training hasn't happened yet.</p>
+  <div class="callout">
+    <strong>The core bet:</strong> A small model that's designed specifically for PII should beat a large model that's designed for everything. That bet is reasonable, but we haven't proven it yet.
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-title" id="what">1. What Are These Three Models?</div>
+
+<div class="q">What is SpaCy Large, exactly?</div>
+<div class="a">
+  <p>SpaCy's <code>en_core_web_lg</code> is a general-purpose NLP pipeline trained on the OntoNotes 5.0 corpus. It uses a CNN-based architecture (not a transformer) with GloVe word vectors. It's 741 MB, most of which is the word vector table.</p>
+  <p>For PII work, SpaCy is almost always used through <strong>Microsoft Presidio</strong> &mdash; an open-source framework that combines SpaCy's NER (for names, organizations, locations) with regex rules (for SSNs, credit cards, emails, phone numbers) and validation logic (like Luhn checksums for credit cards).</p>
+  <p>SpaCy also offers <code>en_core_web_trf</code>, a transformer-based model using RoBERTa-base (125M params). It's significantly more accurate (90% F1 vs 85% F1) but 20-30x slower on CPU. Most Presidio deployments use the CNN model for speed.</p>
+  <div class="callout">
+    <strong>Think of SpaCy/Presidio as:</strong> A fast rule-based system with an NER model for names and locations bolted on. It's a framework, not a model. Performance depends entirely on how you configure it.
+  </div>
+</div>
+
+<div class="q">What is GLiNER 2?</div>
+<div class="a">
+  <p>GLiNER is a family of zero-shot NER models. "Zero-shot" means you tell it what entity types to look for at inference time &mdash; no retraining needed. You pass entity type names (like "PERSON", "SSN", "CREDIT_CARD") as part of the input, and the model matches text spans to those types.</p>
+  <p>The original GLiNER (NAACL 2024) uses DeBERTa-v3 as the backbone. GLiNER 2 (EMNLP 2025) extends this to multi-task information extraction. Several organizations have fine-tuned GLiNER variants specifically for PII: NVIDIA (<code>nvidia/gliner-PII</code>), Gretel (<code>gretel-gliner-bi-base</code>), and Knowledgator.</p>
+  <p>The large variant has ~460M parameters. The medium variant uses DeBERTa-v3-base (~90M params). GLiNER2 itself is ~205M params.</p>
+  <div class="callout">
+    <strong>Think of GLiNER as:</strong> A flexible general-purpose entity extractor that you can point at any entity type. Jack of all trades, master of none &mdash; unless you fine-tune it for a specific domain, at which point you lose the zero-shot advantage.
+  </div>
+</div>
+
+<div class="q">What is DataFog PII-NER v1?</div>
+<div class="a">
+  <p>Our model. DeBERTa-v3-xsmall (70.7M params, 384-dim) combined with a Character CNN (catches patterns like XXX-XX-XXXX), a gating fusion layer (dynamically blends character and context signals per token), and a CRF head (enforces valid BIO tag sequences).</p>
+  <p>It's designed from the ground up for one task: finding PII in English text. Fixed taxonomy of 81 entity types, 4 severity tiers, trained on 360K PII-specific examples. Target: ONNX INT8, ~25 MB, runs on CPU at ~10ms per 128 tokens.</p>
+  <div class="callout warn">
+    <strong>Important caveat:</strong> The smoke test passed (F1 0.992 on 100 memorized examples). Full training on 360K examples hasn't happened yet. The performance targets below are projections based on architecture design and literature, not measured results. SpaCy and GLiNER numbers are real. Ours are a bet.
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-title" id="scorecard">2. The Scorecard</div>
+
+<div class="q">Give me the side-by-side numbers.</div>
+<div class="a">
+  <table>
+    <tr>
+      <th></th>
+      <th><span class="model-tag tag-spacy">SpaCy lg + Presidio</span></th>
+      <th><span class="model-tag tag-gliner">GLiNER 2 / PII</span></th>
+      <th><span class="model-tag tag-datafog">DataFog v1</span></th>
+    </tr>
+    <tr>
+      <td><strong>Parameters</strong></td>
+      <td>~7M (NER component)</td>
+      <td>90-460M (depends on variant)</td>
+      <td>~71M</td>
+    </tr>
+    <tr>
+      <td><strong>Model size on disk</strong></td>
+      <td>741 MB (mostly word vectors)</td>
+      <td>770 MB &ndash; 1.3 GB</td>
+      <td>~25 MB (ONNX INT8 target)</td>
+    </tr>
+    <tr>
+      <td><strong>Backbone</strong></td>
+      <td>CNN + GloVe vectors</td>
+      <td>DeBERTa-v3-base (768-dim)</td>
+      <td>DeBERTa-v3-xsmall (384-dim)</td>
+    </tr>
+    <tr>
+      <td><strong>PII types (native)</strong></td>
+      <td class="orange">~7 (PERSON, ORG, GPE, LOC, DATE, TIME, MONEY)</td>
+      <td class="green">Any (zero-shot, user-specified)</td>
+      <td class="green">81 fixed types across 4 tiers</td>
+    </tr>
+    <tr>
+      <td><strong>Structured PII<br>(SSN, CC, email)</strong></td>
+      <td class="orange">Regex only (not learned)</td>
+      <td class="orange">Subword tokens only (no char features)</td>
+      <td class="green">Character CNN + contextual</td>
+    </tr>
+    <tr>
+      <td><strong>Sequence constraints</strong></td>
+      <td class="dim">None (token-independent)</td>
+      <td class="dim">None (span matching)</td>
+      <td class="green">CRF enforces valid BIO</td>
+    </tr>
+    <tr>
+      <td><strong>PII F1 (published)</strong></td>
+      <td>~0.85 (Presidio vanilla)</td>
+      <td>0.64-0.95 (varies by variant/dataset)</td>
+      <td class="dim">TBD (smoke test: 0.992 overfit)</td>
+    </tr>
+    <tr>
+      <td><strong>Inference speed (CPU)</strong></td>
+      <td class="green">~3,000 words/sec</td>
+      <td>~50-80ms / 128 tokens</td>
+      <td>~10ms / 128 tokens (target)</td>
+    </tr>
+    <tr>
+      <td><strong>GPU required?</strong></td>
+      <td class="green">No</td>
+      <td class="orange">Recommended</td>
+      <td class="green">No (ONNX INT8)</td>
+    </tr>
+    <tr>
+      <td><strong>Zero-shot?</strong></td>
+      <td class="red">No</td>
+      <td class="green">Yes</td>
+      <td class="red">No (fixed taxonomy)</td>
+    </tr>
+    <tr>
+      <td><strong>Status</strong></td>
+      <td class="green">Production (mature)</td>
+      <td class="green">Published (EMNLP 2025)</td>
+      <td class="orange">Smoke test passed</td>
+    </tr>
+  </table>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-title" id="pii">3. PII Coverage: Who Can Find What?</div>
+
+<div class="q">What PII types can each model actually detect?</div>
+<div class="a">
+  <table>
+    <tr>
+      <th>PII Type</th>
+      <th><span class="model-tag tag-spacy">SpaCy/Presidio</span></th>
+      <th><span class="model-tag tag-gliner">GLiNER</span></th>
+      <th><span class="model-tag tag-datafog">DataFog v1</span></th>
+    </tr>
+    <tr>
+      <td>Person name</td>
+      <td class="green">NER (trained)</td>
+      <td class="green">Zero-shot</td>
+      <td class="green">Trained (Tier 2)</td>
+    </tr>
+    <tr>
+      <td>Email address</td>
+      <td class="orange">Regex</td>
+      <td class="purple">Zero-shot (subword)</td>
+      <td class="green">CharCNN + context</td>
+    </tr>
+    <tr>
+      <td>SSN (XXX-XX-XXXX)</td>
+      <td class="orange">Regex</td>
+      <td class="purple">Zero-shot (subword)</td>
+      <td class="green">CharCNN + context</td>
+    </tr>
+    <tr>
+      <td>Credit card number</td>
+      <td class="orange">Regex + Luhn</td>
+      <td class="purple">Zero-shot (subword)</td>
+      <td class="green">CharCNN + context</td>
+    </tr>
+    <tr>
+      <td>Phone number</td>
+      <td class="orange">Regex</td>
+      <td class="purple">Zero-shot (subword)</td>
+      <td class="green">CharCNN + context</td>
+    </tr>
+    <tr>
+      <td>IP address</td>
+      <td class="orange">Regex</td>
+      <td class="purple">Zero-shot (subword)</td>
+      <td class="green">CharCNN + context</td>
+    </tr>
+    <tr>
+      <td>Location</td>
+      <td class="green">NER (trained)</td>
+      <td class="green">Zero-shot</td>
+      <td class="green">Trained (Tier 3)</td>
+    </tr>
+    <tr>
+      <td>Date of birth</td>
+      <td class="orange">Partial (DATE entity)</td>
+      <td class="green">Zero-shot</td>
+      <td class="green">Trained (Tier 2)</td>
+    </tr>
+    <tr>
+      <td>Gender</td>
+      <td class="red">Not supported</td>
+      <td class="purple">Zero-shot (variable)</td>
+      <td class="green">Trained (Tier 3)</td>
+    </tr>
+    <tr>
+      <td>IBAN</td>
+      <td class="orange">Regex (custom)</td>
+      <td class="purple">Zero-shot (variable)</td>
+      <td class="green">Trained (Tier 4)</td>
+    </tr>
+    <tr>
+      <td>Medical record #</td>
+      <td class="red">Not supported</td>
+      <td class="purple">Zero-shot (variable)</td>
+      <td class="green">Trained (Tier 4)</td>
+    </tr>
+    <tr>
+      <td>Salary / financial</td>
+      <td class="orange">MONEY entity (partial)</td>
+      <td class="purple">Zero-shot (variable)</td>
+      <td class="green">Trained (Tier 4)</td>
+    </tr>
+    <tr>
+      <td>Crypto wallet</td>
+      <td class="red">Not supported</td>
+      <td class="purple">Zero-shot (variable)</td>
+      <td class="green">Trained (Tier 4)</td>
+    </tr>
+  </table>
+  <p style="margin-top: 12px; font-size: 0.88em; padding-left: 24px;">
+    <span class="green">&#9679;</span> Learned / trained &nbsp;
+    <span class="orange">&#9679;</span> Regex / rules &nbsp;
+    <span class="purple">&#9679;</span> Zero-shot (may or may not work well) &nbsp;
+    <span class="red">&#9679;</span> Not available
+  </p>
+</div>
+
+<div class="q">SpaCy only covers 7 types natively. How does Presidio get to more?</div>
+<div class="a">
+  <p>Presidio stitches together three detection methods:</p>
+  <p><strong>1. SpaCy NER</strong> handles names, organizations, locations, dates &mdash; things that need language understanding. This is the "smart" part.</p>
+  <p><strong>2. Regex patterns</strong> handle structured PII like SSNs (<code>\d{3}-\d{2}-\d{4}</code>), emails (<code>.*@.*\..*</code>), phone numbers, IP addresses. These are brittle pattern-matching rules.</p>
+  <p><strong>3. Validation/checksum logic</strong> handles credit cards (Luhn algorithm), IBANs (mod-97 check), etc.</p>
+  <p>This hybrid works. It's production-proven. But it has a fundamental problem: the regex recognizers and the NER model don't talk to each other. SpaCy doesn't know that the regex found an SSN two tokens later. Each detection method operates independently and their outputs are merged.</p>
+  <div class="callout">
+    <strong>The gap:</strong> Regex can't use context. The pattern <code>123-45-6789</code> looks like an SSN, but so does a serial number, a tracking code, or a phone extension. Presidio has a "context-aware enhancer" that boosts confidence when it sees keywords like "SSN" or "social security" nearby, but it's a heuristic patch, not learned reasoning. Our CharCNN learns these patterns <em>jointly with context</em> in a single model.
+  </div>
+</div>
+
+<div class="q">GLiNER can detect "any" entity type. Does that mean it's automatically better?</div>
+<div class="a">
+  <p>It's more flexible, not more accurate. Zero-shot means GLiNER has never seen a training example labeled "CRYPTO_WALLET" &mdash; it tries to figure out what you mean from the type name alone. Sometimes that works well ("PERSON" is pretty clear), sometimes it doesn't ("MARITAL_STATUS" is vague).</p>
+  <p>The published numbers tell the story:</p>
+  <table>
+    <tr><th>GLiNER Variant</th><th>Dataset</th><th>F1</th></tr>
+    <tr><td>NVIDIA gliner-PII (fine-tuned, large)</td><td>AI4Privacy</td><td>0.64</td></tr>
+    <tr><td>NVIDIA gliner-PII (fine-tuned, large)</td><td>Nemotron-PII</td><td>0.87</td></tr>
+    <tr><td>Knowledgator gliner-pii-base (fine-tuned)</td><td>Multi-domain PII</td><td>0.81</td></tr>
+    <tr><td>Gretel gliner-bi-base (fine-tuned)</td><td>Gretel PII test</td><td>0.95</td></tr>
+    <tr><td>GLiNER-L (zero-shot, no fine-tuning)</td><td>CrossNER average</td><td>0.61</td></tr>
+  </table>
+  <p>Notice the spread: 0.61 to 0.95 depending on whether it's fine-tuned and what data it's tested on. The zero-shot score (0.61) is dramatically lower than the fine-tuned scores. Once you fine-tune GLiNER for PII, you've given up the zero-shot advantage &mdash; and now you're comparing a fine-tuned 460M-param model to our fine-tuned 71M-param model.</p>
+  <div class="callout warn">
+    <strong>The uncomfortable truth about zero-shot:</strong> NVIDIA's GLiNER-PII is 460M parameters, fine-tuned on PII data, and gets 0.64 F1 on AI4Privacy. That's the same dataset we're training on. If a 460M-param fine-tuned model gets 0.64 on this dataset, something about the GLiNER architecture isn't ideal for PII. The likely reason: no character-level features. SSNs, credit cards, and IBANs are defined by their character patterns, and GLiNER only sees subword tokens.
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-title" id="accuracy">4. Accuracy: How Good Is Each One?</div>
+
+<div class="q">What does the published evidence say about accuracy on PII?</div>
+<div class="a">
+  <table>
+    <tr><th>System</th><th>Task</th><th>F1</th><th>Source</th></tr>
+    <tr><td>Presidio (SpaCy backend, vanilla)</td><td>General PII</td><td>0.85</td><td>arxiv benchmark study, 2024</td></tr>
+    <tr><td>Presidio (SpaCy backend, vanilla)</td><td>Kaggle structured PII</td><td class="red">0.29</td><td>Presidio research</td></tr>
+    <tr><td>SpaCy en_core_web_trf</td><td>OntoNotes NER (18 types)</td><td>0.90</td><td>SpaCy docs</td></tr>
+    <tr><td>SpaCy en_core_web_lg</td><td>OntoNotes NER (18 types)</td><td>0.85</td><td>SpaCy docs</td></tr>
+    <tr><td>GLiNER-L (zero-shot)</td><td>Out-of-domain NER avg</td><td>0.61</td><td>NAACL 2024 paper</td></tr>
+    <tr><td>NVIDIA GLiNER-PII (fine-tuned)</td><td>AI4Privacy</td><td>0.64</td><td>HuggingFace card</td></tr>
+    <tr><td>Gretel GLiNER-bi-base (fine-tuned)</td><td>Gretel PII test set</td><td>0.95</td><td>Gretel blog</td></tr>
+    <tr><td>Custom fine-tuned transformer</td><td>Text anonymisation benchmark</td><td>0.94-0.95</td><td>arxiv benchmark, 2024</td></tr>
+    <tr><td>Hybrid rule+NER system</td><td>Financial PII</td><td>0.91</td><td>Scientific Reports, 2025</td></tr>
+    <tr><td><strong>DataFog v1 (smoke test)</strong></td><td><strong>100 examples, overfit</strong></td><td class="dim"><strong>0.99*</strong></td><td><strong>Not a real benchmark</strong></td></tr>
+  </table>
+  <p style="margin-top: 8px; font-size: 0.88em; padding-left: 24px; color: #94a3b8;">* Smoke test F1 is on memorized training data. It proves the architecture works, not that it generalizes.</p>
+</div>
+
+<div class="q">Presidio got 0.29 F1 on structured PII? That seems terrible.</div>
+<div class="a">
+  <p>It is terrible, and it's instructive. That 0.29 was on the Kaggle PII detection dataset, which has diverse PII types in structured formats. Presidio's regex recognizers are designed for well-formatted PII (standard US SSN format, standard email format). When the data has non-standard formats, international phone numbers, or PII embedded in unusual contexts, the regex rules fall apart.</p>
+  <p>The 0.85 number is on "general text" that tends to have cleaner, more standard PII. In the real world, you see both.</p>
+  <div class="callout">
+    <strong>This is the fundamental weakness of rule-based PII:</strong> Regex doesn't generalize. <code>123-45-6789</code> matches the SSN regex, but <code>SSN 123 45 6789</code> or <code>social: 123456789</code> might not. A learned model that understands "this looks like an SSN based on the characters AND the surrounding context" handles variation naturally.
+  </div>
+</div>
+
+<div class="q">The "custom fine-tuned transformer" in that benchmark got 0.94-0.95 F1. That's what we're trying to build, right?</div>
+<div class="a">
+  <p>Exactly. That benchmark result from the 2024 arxiv text anonymisation study confirms that a task-specific fine-tuned transformer is the best approach for PII detection &mdash; consistently beating both SpaCy/Presidio (~0.85) and zero-shot GLiNER (~0.61-0.81).</p>
+  <p>Our model adds two things on top of the standard fine-tuned transformer approach: the Character CNN (for structured PII patterns) and the CRF head (for sequence validity). Both are designed to push the number above where a plain fine-tuned DeBERTa would land.</p>
+  <p>Whether we get to 0.94+ is the open question. The architecture supports it. The training data supports it. But we need to actually train on the full dataset and measure.</p>
+</div>
+
+<!-- ============================================================ -->
+<!-- ============================================================ -->
+<div class="section-title" id="data">5. Training Data: What Did They Actually Train On?</div>
+
+<div class="q">This is the part nobody talks about. What data produced those F1 numbers?</div>
+<div class="a">
+  <p>This is the single most important context for interpreting every benchmark in this document. Here's the side-by-side:</p>
+  <table>
+    <tr>
+      <th>Model</th>
+      <th>Reported F1</th>
+      <th>Training Data</th>
+      <th>Test Data</th>
+      <th>Same Distribution?</th>
+    </tr>
+    <tr>
+      <td><span class="model-tag tag-gliner">Gretel GLiNER-bi-base</span></td>
+      <td><strong>0.95</strong></td>
+      <td>50K synthetic (Mistral-Nemo via Gretel Navigator), 46 types, 47 domains</td>
+      <td>5K held-out from same pipeline</td>
+      <td class="red"><strong>Yes</strong> &mdash; same LLM, same domains, same distribution</td>
+    </tr>
+    <tr>
+      <td><span class="model-tag tag-gliner">NVIDIA GLiNER-PII</span></td>
+      <td><strong>0.87</strong></td>
+      <td>100K synthetic (Mistral-Small-24B via NeMo Data Designer), 55+ types, 50+ industries</td>
+      <td>100K held-out from same pipeline</td>
+      <td class="red"><strong>Yes</strong> &mdash; same generation pipeline</td>
+    </tr>
+    <tr>
+      <td><span class="model-tag tag-gliner">NVIDIA GLiNER-PII</span></td>
+      <td class="orange"><strong>0.64</strong></td>
+      <td>(same as above)</td>
+      <td>AI4Privacy (different dataset entirely)</td>
+      <td class="green"><strong>No</strong> &mdash; different data, different labels, different domains</td>
+    </tr>
+    <tr>
+      <td>Custom Transformer (arxiv 2024)</td>
+      <td><strong>0.95</strong></td>
+      <td>CoNLL-2003 train (~14K sentences, real newswire)</td>
+      <td>CoNLL-2003 test (standard split)</td>
+      <td class="orange"><strong>Standard</strong> &mdash; but only 4 entity types (PER, LOC, ORG, MISC)</td>
+    </tr>
+    <tr>
+      <td>Hybrid NER+Rules (Sci. Reports 2025)</td>
+      <td><strong>0.91</strong></td>
+      <td>45K synthetic (Faker-generated financial docs), 8 types</td>
+      <td>Held-out from same Faker pipeline</td>
+      <td class="red"><strong>Yes</strong> &mdash; same Faker templates</td>
+    </tr>
+    <tr>
+      <td><span class="model-tag tag-gliner">Knowledgator GLiNER-PII-base</span></td>
+      <td><strong>0.81</strong></td>
+      <td>Undisclosed</td>
+      <td>E3-JSI synthetic-multi-pii (2.97K, 7 languages)</td>
+      <td class="dim">Unknown &mdash; training data not public</td>
+    </tr>
+    <tr>
+      <td><span class="model-tag tag-spacy">Presidio (SpaCy)</span></td>
+      <td><strong>0.85</strong></td>
+      <td>SpaCy: OntoNotes 5.0 + regex rules (hand-written)</td>
+      <td>General text anonymisation benchmark</td>
+      <td class="orange">Mixed &mdash; NER in-dist, regex rules are domain-agnostic</td>
+    </tr>
+    <tr style="background: #172554;">
+      <td><span class="model-tag tag-datafog">DataFog v1 (planned)</span></td>
+      <td class="dim"><strong>TBD</strong></td>
+      <td>~359K combined: AI4Privacy (209K) + Nemotron (100K) + Gretel (50K), 81 types</td>
+      <td>Held-out splits + cross-dataset eval</td>
+      <td class="green"><strong>Both</strong> &mdash; in-dist + cross-dataset planned</td>
+    </tr>
+  </table>
+</div>
+
+<div class="q">Wait. So Gretel's 0.95 F1 was tested on data from the same generation pipeline as the training data?</div>
+<div class="a">
+  <p>Yes. Both the 50K training examples and the 5K test examples were generated by the same system: Gretel Navigator using Mistral-Nemo-2407, same 47 domains, same 46 entity types, same generation templates. The test set is a random held-out split from the same distribution.</p>
+  <p>This is like studying for a test using the answer key, then taking a test written by the same person. You'll score well, but it doesn't mean you understand the material.</p>
+  <p>The honest question is: what happens when Gretel's model sees real-world documents it wasn't trained on? We don't know &mdash; they haven't published cross-dataset results. But NVIDIA <em>did</em> publish cross-dataset results for their model, and the answer is sobering.</p>
+</div>
+
+<div class="q">NVIDIA gets 0.87 on their own data but 0.64 on AI4Privacy. That's a 23-point drop. Why?</div>
+<div class="a">
+  <p>Three reasons, all of which matter for understanding what these models actually learn:</p>
+  <p><strong>1. Different entity definitions.</strong> Nemotron-PII uses <code>first_name</code> and <code>last_name</code> as separate entity types. AI4Privacy uses <code>FIRSTNAME</code>, <code>LASTNAME</code>, <code>FULLNAME</code>, and <code>NAME</code>. If the model was trained to find <code>first_name</code> and the test data expects <code>FIRSTNAME</code>, every match is wrong even if the model found the right text span. Label normalization is essential &mdash; and it's not trivial.</p>
+  <p><strong>2. Different synthetic generation styles.</strong> Nemotron uses Mistral-Small-24B with NeMo Data Designer. AI4Privacy uses a proprietary generation pipeline. Each LLM produces text with its own characteristic patterns &mdash; sentence structures, word choices, how it formats PII in context. A model trained on one LLM's output may not generalize to another's.</p>
+  <p><strong>3. Different domain distributions.</strong> Nemotron covers 50+ industries with 90% unstructured text. AI4Privacy covers 229 use cases with 5 interaction styles across 4 languages. The entity frequency distributions, context patterns, and text styles are fundamentally different.</p>
+  <div class="callout warn">
+    <strong>The uncomfortable implication:</strong> If the best-funded PII model (NVIDIA, 570M params, fine-tuned GLiNER-large) drops from 0.87 to 0.64 when evaluated on a different dataset, then <em>every</em> in-distribution score in this space is inflated. Gretel's 0.95 would likely be 0.70-0.75 on AI4Privacy. The hybrid study's 0.91 would likely drop to the 0.70s on non-financial text. Published PII F1 scores are not comparable across models unless they're measured on the same test set.
+  </div>
+</div>
+
+<div class="q">What about that "custom transformer" that got 0.95 F1 in the arxiv benchmark?</div>
+<div class="a">
+  <p>That number is real but misleading for our purposes. It was measured on <strong>CoNLL-2003</strong>, which has only 4 entity types: PERSON, LOCATION, ORGANIZATION, and MISC. The training data is ~14K sentences of Reuters newswire &mdash; real text, not synthetic.</p>
+  <p>Detecting 4 entity types in clean newswire text is a fundamentally easier task than detecting 46-81 PII types in diverse synthetic or real-world documents. A 0.95 on CoNLL-2003 doesn't tell us anything about how that model would perform on SSNs, credit cards, or medical record numbers &mdash; because those entities don't exist in CoNLL-2003.</p>
+  <p>The useful takeaway: fine-tuned transformers <em>with CRF</em> consistently outperform other approaches on NER. The CRF in that same benchmark scored 0.93, nearly matching the custom transformer. Our architecture includes both.</p>
+</div>
+
+<div class="q">All three of our planned training datasets are synthetic. Is that a problem?</div>
+<div class="a">
+  <p>It's a risk, not a dealbreaker. Here's the breakdown of what we're working with:</p>
+  <table>
+    <tr>
+      <th>Dataset</th>
+      <th>Size (train)</th>
+      <th>Generator</th>
+      <th>Entity Types</th>
+      <th>Domains</th>
+    </tr>
+    <tr>
+      <td>AI4Privacy</td>
+      <td>209K</td>
+      <td>Proprietary (undisclosed LLM)</td>
+      <td>54</td>
+      <td>229 use cases, 4 languages</td>
+    </tr>
+    <tr>
+      <td>NVIDIA Nemotron-PII</td>
+      <td>100K</td>
+      <td>Mistral-Small-24B + NeMo Data Designer</td>
+      <td>55+</td>
+      <td>50+ industries</td>
+    </tr>
+    <tr>
+      <td>Gretel PII</td>
+      <td>50K</td>
+      <td>Mistral-Nemo-2407 + Gretel Navigator</td>
+      <td>46</td>
+      <td>47 domains</td>
+    </tr>
+    <tr style="border-top: 2px solid #334155;">
+      <td><strong>Combined</strong></td>
+      <td><strong>~359K</strong></td>
+      <td><strong>3 different generators</strong></td>
+      <td><strong>~81 (after normalization)</strong></td>
+      <td><strong>Hundreds of domains</strong></td>
+    </tr>
+  </table>
+  <p>The fact that each dataset was generated by a <em>different</em> system is actually an advantage. A model trained on three different synthetic distributions is forced to learn the underlying PII patterns rather than the quirks of one particular LLM's output style. It's a form of data augmentation.</p>
+  <div class="callout">
+    <strong>The real risk with synthetic data:</strong> All three generators produce "clean" PII &mdash; perfectly formatted SSNs, standard email formats, well-structured addresses. Real-world PII is messy: OCR errors, inconsistent formatting, PII split across multiple lines, abbreviations, typos. Our model may train on clean patterns and struggle with noisy real-world data. This is something to test explicitly during evaluation.
+  </div>
+</div>
+
+<div class="q">Given all this, what's the honest cross-dataset performance we should expect?</div>
+<div class="a">
+  <p>Based on the pattern we see:</p>
+  <table>
+    <tr><th>Scenario</th><th>Expected F1</th><th>Reasoning</th></tr>
+    <tr>
+      <td>Eval on held-out split from our combined training data</td>
+      <td class="green">0.88 &ndash; 0.95</td>
+      <td>In-distribution. Three datasets provide diversity. With CharCNN + CRF, upper end is plausible.</td>
+    </tr>
+    <tr>
+      <td>Eval on a completely new PII dataset (e.g., PIILO, real clinical text)</td>
+      <td class="orange">0.70 &ndash; 0.85</td>
+      <td>Out-of-distribution. NVIDIA's 23-point drop is the cautionary tale. Our multi-dataset training helps, but expect a gap.</td>
+    </tr>
+    <tr>
+      <td>Eval on Tier 1 types only (SSN, credit card, etc.)</td>
+      <td style="color: #eab308;">0.85 &ndash; 0.95</td>
+      <td>Structured PII has consistent patterns. CharCNN should help. But rare types may have few training examples.</td>
+    </tr>
+  </table>
+  <div class="callout green">
+    <strong>Our advantage over competitors here:</strong> We're training on all three major PII datasets combined. Gretel trained on Gretel data only. NVIDIA trained on Nemotron data only. By combining sources, we get cross-distribution training that no single-dataset model has. This should narrow the in-distribution vs out-of-distribution gap &mdash; but by how much is the open question.
+  </div>
+</div>
+
+<div class="q">Is there a standard PII benchmark everyone agrees on?</div>
+<div class="a">
+  <p>No. This is one of the biggest problems in PII detection research. Unlike NLP where everyone reports on GLUE, SuperGLUE, or SQuAD, PII detection has no universal benchmark.</p>
+  <p>Each team evaluates on their own data: Gretel on Gretel's test set, NVIDIA on Nemotron's test set, Knowledgator on E3-JSI. This makes published F1 numbers <strong>nearly impossible to compare directly</strong>. A 0.95 on one test set might be equivalent to a 0.70 on another.</p>
+  <div class="callout">
+    <strong>What we should do:</strong> After full training, evaluate on <em>every available test set</em> &mdash; not just our own held-out split. Run on AI4Privacy test, Nemotron test, Gretel test, and ideally PIILO (if we can get access) and real annotated documents. Report all numbers, not just the best one. That level of transparency is rare in this space and would make our results credible.
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-title" id="speed">6. Speed &amp; Size: What Does Deployment Look Like?</div>
+
+<div class="q">How do these compare for a production deployment?</div>
+<div class="a">
+  <div class="vs-grid">
+    <div class="vs-card" style="border-top: 3px solid #22c55e;">
+      <h4 style="color: #22c55e;">SpaCy lg + Presidio</h4>
+      <p><strong>741 MB</strong> on disk</p>
+      <p><strong>~3,000 words/sec</strong> on CPU</p>
+      <p>No GPU needed</p>
+      <p>Mature, battle-tested</p>
+      <p style="margin-top: 8px; color: #64748b;">The "just works" option. Fast, cheap, good enough for many use cases. Add regex recognizers as needed.</p>
+    </div>
+    <div class="vs-card" style="border-top: 3px solid #a78bfa;">
+      <h4 style="color: #a78bfa;">GLiNER 2 / PII</h4>
+      <p><strong>770 MB &ndash; 1.3 GB</strong> on disk</p>
+      <p><strong>~50-80ms</strong> per 128 tokens</p>
+      <p>GPU recommended</p>
+      <p>Flexible entity types</p>
+      <p style="margin-top: 8px; color: #64748b;">The "we need flexibility" option. Handles new entity types without retraining, but needs more infrastructure.</p>
+    </div>
+    <div class="vs-card" style="border-top: 3px solid #3b82f6;">
+      <h4 style="color: #3b82f6;">DataFog v1 (target)</h4>
+      <p><strong>~25 MB</strong> on disk (INT8)</p>
+      <p><strong>~10ms</strong> per 128 tokens</p>
+      <p>CPU only, no GPU</p>
+      <p>Edge-deployable</p>
+      <p style="margin-top: 8px; color: #64748b;">The "we own the model" option. Smallest, fastest, but requires retraining for new entity types.</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <strong>The size difference matters more than you'd think.</strong> At 25 MB, DataFog v1 can run in a browser (via ONNX.js / WebAssembly), on a mobile device, in a serverless function with minimal cold start, or on an IoT edge device. At 741 MB (SpaCy) or 1.3 GB (GLiNER), you need a proper server with enough RAM, and cold starts become an issue for serverless.
+  </div>
+</div>
+
+<div class="q">Is 10ms per 128 tokens realistic?</div>
+<div class="a">
+  <p>For a DeBERTa-xsmall model quantized to INT8 via ONNX Runtime, yes, this is a reasonable target. DeBERTa-xsmall has 12 layers with 384-dim hidden size and 6 attention heads. After INT8 quantization:</p>
+  <table>
+    <tr><th>Operation</th><th>Est. Latency (CPU)</th></tr>
+    <tr><td>DeBERTa forward pass (INT8, 128 tokens)</td><td>~6-8ms</td></tr>
+    <tr><td>CharCNN forward pass</td><td>~0.5ms</td></tr>
+    <tr><td>GatingFusion + CRF decode</td><td>~1-2ms</td></tr>
+    <tr><td><strong>Total</strong></td><td><strong>~8-11ms</strong></td></tr>
+  </table>
+  <p>Compare to GLiNER which must encode 50+ entity type tokens alongside the text, perform span-entity matching over all candidate spans, and run on a larger backbone (768-dim, 12 heads). The ~50-80ms estimate for GLiNER is consistent with published numbers.</p>
+  <p>SpaCy's CNN architecture is a different beast &mdash; CNNs are extremely fast on CPU, which is why it achieves ~3,000 words/sec. But it trades accuracy for that speed.</p>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-title" id="architecture">7. Architectural Tradeoffs</div>
+
+<div class="q">What can our model do that GLiNER fundamentally can't?</div>
+<div class="a">
+  <p>Three things:</p>
+  <p><strong>1. See character patterns.</strong> GLiNER and SpaCy operate on subword tokens. They never see the raw characters. Our CharCNN looks at the actual characters of each token and can learn that "three digits, dash, two digits, dash, four digits" is an SSN pattern. GLiNER sees <code>["_555", "-12", "-34", "56"]</code> and has to learn the pattern indirectly from subword token co-occurrence. This is why NVIDIA's GLiNER-PII gets only 0.64 F1 on AI4Privacy despite being 460M parameters.</p>
+  <p><strong>2. Enforce sequence validity.</strong> Our CRF head physically cannot output <code>I-EMAIL</code> after <code>B-PERSON</code>. The transition matrix makes that transition score negative infinity. GLiNER uses span matching with greedy decoding &mdash; it can produce contradictory extractions (overlapping spans with different types) and has no mechanism to enforce sequential BIO constraints.</p>
+  <p><strong>3. Run without entity type tokens in the input.</strong> GLiNER prepends entity type names as tokens, which means: (a) the effective sequence gets longer, (b) with 50+ types, you're adding 50+ tokens to every input, and (c) performance degrades beyond ~30 types because the entity type tokens compete with the actual text for attention. Our model always predicts over all 81 types simultaneously with zero additional input overhead.</p>
+</div>
+
+<div class="q">What can GLiNER do that our model fundamentally can't?</div>
+<div class="a">
+  <p>One critical thing: <strong>detect entity types it has never been trained on.</strong></p>
+  <p>If a customer says "we also need to detect EMPLOYEE_BADGE_NUMBER and INTERNAL_PROJECT_CODE," GLiNER can try to find those right now, zero-shot, with no changes. We would need to: (1) collect labeled examples of those types, (2) add them to the label schema, (3) retrain or fine-tune, (4) redeploy. That's days or weeks of work vs. minutes.</p>
+  <p>For a PII product, the question is: how often do entity types actually change? If the taxonomy is stable (SSNs, credit cards, names, emails), the zero-shot flexibility isn't worth the accuracy and speed cost. If customers regularly need custom entity types, it's a significant advantage.</p>
+  <div class="callout">
+    <strong>The pragmatic answer:</strong> PII taxonomies are relatively stable. GDPR, CCPA, and HIPAA define the categories. New PII types emerge slowly (crypto wallets, biometric data), not weekly. A quarterly retraining cycle can handle taxonomy changes. The speed and accuracy gains from a specialist model outweigh the flexibility cost for this domain.
+  </div>
+</div>
+
+<div class="q">What can SpaCy/Presidio do that neither of the other two can?</div>
+<div class="a">
+  <p><strong>Validation and checksums.</strong> Presidio doesn't just detect credit card numbers &mdash; it validates them with the Luhn algorithm. It checks IBAN checksums. It validates SSN format rules (not starting with 000, etc.). Neither GLiNER nor our model does this natively. They predict "this is a credit card number" but don't verify it's a valid one.</p>
+  <p>This matters for precision. A learned model might predict that <code>1234-5678-9012-3456</code> is a credit card, but Luhn would tell you it's not a valid card number &mdash; it's probably a serial number or tracking code.</p>
+  <div class="callout green">
+    <strong>Not mutually exclusive.</strong> In production, you'd likely combine our model's predictions with Presidio-style validation as a post-processing step. Use the model for detection, then validate structured PII with checksums. Best of both worlds.
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-title" id="honest">8. The Honest Case Against Building Our Own</div>
+
+<div class="q">What are the strongest arguments for NOT building this model?</div>
+<div class="a">
+  <p>Let's be honest about the risks:</p>
+
+  <div class="callout red" style="margin-bottom: 16px;">
+    <strong>1. It might not beat the fine-tuned GLiNER variants.</strong><br>
+    Gretel's fine-tuned GLiNER-bi-base achieves 0.95 F1 on their PII test set. That's already excellent. If our model lands at 0.92, we've spent weeks building something marginally worse than an off-the-shelf model. The CharCNN and CRF <em>should</em> help, but "should" and "does" are different things.
+  </div>
+
+  <div class="callout red" style="margin-bottom: 16px;">
+    <strong>2. DeBERTa-v3-xsmall might be too small.</strong><br>
+    384-dim hidden size vs GLiNER's 768-dim. We're betting the CharCNN and CRF compensate for the smaller backbone. If contextual PII types (PERSON, LOCATION, ORGANIZATION) underperform, the backbone is the bottleneck and we'd need to upgrade to DeBERTa-v3-base, which doubles the model size and partially erases our efficiency advantage.
+  </div>
+
+  <div class="callout red" style="margin-bottom: 16px;">
+    <strong>3. Maintenance burden.</strong><br>
+    SpaCy and GLiNER are maintained by dedicated teams (Explosion AI, Fastino AI). They get regular updates, bug fixes, and community contributions. Our model is something we maintain ourselves. Every backbone security patch, every PyTorch version upgrade, every new entity type &mdash; that's on us.
+  </div>
+
+  <div class="callout red" style="margin-bottom: 16px;">
+    <strong>4. The 0.85 Presidio number might be "good enough."</strong><br>
+    For many PII use cases, 85% F1 with fast CPU inference and regex validation is perfectly acceptable. The incremental value of going from 0.85 to 0.93 depends on the customer's tolerance for missed PII. If false negatives aren't catastrophic for the use case, Presidio is the safer choice.
+  </div>
+
+  <div class="callout red">
+    <strong>5. Training data quality is unvalidated.</strong><br>
+    We're planning to train on AI4Privacy + Nemotron-PII + Gretel. These datasets have different annotation conventions, different entity type definitions, and potentially conflicting labels. Label noise in training data can silently cap model performance. We haven't audited the label quality yet.
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-title" id="case-for">9. The Case For Building Our Own</div>
+
+<div class="q">Given all those risks, why is this still worth doing?</div>
+<div class="a">
+  <p>Four reasons that address different concerns:</p>
+
+  <div class="callout green" style="margin-bottom: 16px;">
+    <strong>1. The evidence says task-specific fine-tuned models win.</strong><br>
+    Across every benchmark I've found, a fine-tuned transformer trained on PII data outperforms both SpaCy/Presidio and zero-shot GLiNER. The 2024 arxiv text anonymisation benchmark: custom transformer 0.94-0.95 vs Presidio 0.85. The 2025 Scientific Reports hybrid study: 0.91. The literature is clear: if you have the data and the task is well-defined, a specialist beats a generalist. We have 360K labeled examples. PII detection is well-defined.
+  </div>
+
+  <div class="callout green" style="margin-bottom: 16px;">
+    <strong>2. No existing model has character-level features + CRF + transformer for PII.</strong><br>
+    This is the gap identified in the research survey. Piiranha uses a transformer but no character features (280M params). GLiNER uses a transformer with span matching but no character features. Presidio uses regex for characters but no learned features. Our architecture is the first to combine all three in a PII-specific model. This is a genuine architectural contribution, not just a different fine-tuning job.
+  </div>
+
+  <div class="callout green" style="margin-bottom: 16px;">
+    <strong>3. The deployment profile is unique.</strong><br>
+    25 MB, CPU-only, 10ms latency, no GPU. No existing PII model hits this profile. This unlocks use cases that SpaCy and GLiNER can't serve: browser-based PII scanning, mobile device deployment, serverless functions with tight cold-start budgets, edge devices in healthcare/finance. For DataFog as a product, this deployment flexibility is a competitive moat.
+  </div>
+
+  <div class="callout green">
+    <strong>4. We own the model and the training pipeline.</strong><br>
+    Depending on Presidio or a Gretel/NVIDIA model means depending on their roadmap, their licensing decisions, and their definition of "PII." Owning the model means we can add entity types, adjust tier thresholds, retrain on domain-specific data, and ship updates on our own schedule. For a PII product company, this control is strategically important.
+  </div>
+</div>
+
+<div class="q">If you had to put a probability on this working, what would it be?</div>
+<div class="a">
+  <p>Define "working":</p>
+  <table>
+    <tr><th>Target</th><th>Probability</th><th>Reasoning</th></tr>
+    <tr>
+      <td>F1 &ge; 0.85 (matches Presidio)</td>
+      <td class="green" style="font-weight: 700;">~90%</td>
+      <td>A fine-tuned DeBERTa on 360K PII examples would have to be badly implemented to not beat vanilla Presidio. Even without CharCNN/CRF, a plain fine-tuned model should hit this.</td>
+    </tr>
+    <tr>
+      <td>F1 &ge; 0.90 (our minimum target)</td>
+      <td style="color: #eab308; font-weight: 700;">~75%</td>
+      <td>Depends on data quality and whether xsmall is large enough. The CharCNN and CRF should help, but if the training data has significant label noise, 0.90 is ambitious.</td>
+    </tr>
+    <tr>
+      <td>F1 &ge; 0.95 (matches best fine-tuned GLiNER)</td>
+      <td class="orange" style="font-weight: 700;">~40-50%</td>
+      <td>This would require clean data, good hyperparameter tuning, and the CharCNN genuinely helping on structured PII. Achievable but not certain. May need to upgrade to DeBERTa-base.</td>
+    </tr>
+    <tr>
+      <td>Tier 1 recall &ge; 0.98</td>
+      <td style="color: #eab308; font-weight: 700;">~65%</td>
+      <td>CharCNN is specifically designed for Tier 1 types (SSN, credit card). If the CharCNN works as designed, this is reachable. But Tier 1 types may be rare in training data.</td>
+    </tr>
+    <tr>
+      <td>&le; 10ms latency (ONNX INT8)</td>
+      <td class="green" style="font-weight: 700;">~85%</td>
+      <td>DeBERTa-xsmall is small. INT8 quantization on ONNX Runtime is well-understood. Main risk is CRF decode adding latency (no standard ONNX op for Viterbi).</td>
+    </tr>
+  </table>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-title" id="prove">10. What We Need to Prove</div>
+
+<div class="q">What are the key experiments that will confirm or kill this approach?</div>
+<div class="a">
+  <p>In priority order, these are the experiments that resolve the biggest unknowns:</p>
+
+  <table>
+    <tr><th>#</th><th>Experiment</th><th>What It Proves</th><th>Kill Criterion</th></tr>
+    <tr>
+      <td>1</td>
+      <td><strong>Full training</strong> on 360K examples, eval on held-out test set</td>
+      <td>Whether the architecture generalizes beyond memorization</td>
+      <td>If F1 &lt; 0.85 on test set, something is fundamentally wrong</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><strong>CharCNN ablation:</strong> Train with and without CharCNN, compare</td>
+      <td>Whether character features actually help or are dead weight</td>
+      <td>If CharCNN adds &lt; 0.3 F1 on structured PII types, it's not worth the complexity</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><strong>Backbone size ablation:</strong> Train with DeBERTa-xsmall vs base</td>
+      <td>Whether 384-dim is the bottleneck</td>
+      <td>If base adds &gt; 2 F1 points, we should probably use base</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td><strong>Head-to-head benchmark</strong> vs GLiNER-PII on AI4Privacy test split</td>
+      <td>Whether we actually beat the competition on the same data</td>
+      <td>If we lose to GLiNER-PII despite being purpose-built, rethink the approach</td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td><strong>ONNX INT8 export</strong> and latency measurement</td>
+      <td>Whether the 10ms target is achievable with CRF decode</td>
+      <td>If latency &gt; 30ms, the speed advantage over GLiNER is modest, not transformative</td>
+    </tr>
+  </table>
+
+  <div class="callout green" style="margin-top: 16px;">
+    <strong>The smoke test was experiment 0.</strong> It answered: "Is the model wired correctly? Can the architecture learn PII at all?" Answer: yes (F1 0.992 on overfit). The experiments above answer the harder questions about generalization, component value, and competitive positioning. Full training is next.
+  </div>
+</div>
+
+<p style="margin-top: 56px; padding-top: 24px; border-top: 1px solid #1e293b; color: #475569; font-size: 0.85em; text-align: center;">
+  DataFog PII-NER v1 &mdash; Model Comparison &mdash; February 2026<br>
+  Sources: GLiNER (NAACL 2024), GLiNER2 (EMNLP 2025), SpaCy v3 docs, Microsoft Presidio,<br>
+  NVIDIA gliner-PII (HuggingFace), Gretel PII blog, arxiv text anonymisation benchmark (2024),<br>
+  Scientific Reports hybrid PII study (2025), DataFog RESEARCH/pii-model-architecture reports
+</p>
+
+</body>
+</html>
