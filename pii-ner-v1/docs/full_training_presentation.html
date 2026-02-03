@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PII-NER v1 — Full Training Deep Dive</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Helvetica Neue', Arial, sans-serif; background: #0f172a; color: #e2e8f0; overflow: hidden; }
+
+  .slide {
+    display: none;
+    width: 100vw;
+    height: 100vh;
+    padding: 50px 70px;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .slide.active { display: flex; }
+
+  h1 { font-size: 2.8em; font-weight: 700; margin-bottom: 16px; color: #f8fafc; }
+  h2 { font-size: 2.1em; font-weight: 600; margin-bottom: 28px; color: #f8fafc; }
+  h3 { font-size: 1.3em; font-weight: 600; margin-bottom: 14px; color: #94a3b8; }
+  p, li { font-size: 1.2em; line-height: 1.7; color: #cbd5e1; }
+  ul { list-style: none; padding-left: 0; }
+  ul li { margin-bottom: 10px; padding-left: 28px; position: relative; }
+  ul li::before { content: ""; position: absolute; left: 0; top: 12px; width: 10px; height: 10px; border-radius: 50%; background: #3b82f6; }
+
+  .subtitle { font-size: 1.4em; color: #94a3b8; margin-bottom: 36px; }
+  .highlight { color: #3b82f6; }
+  .green { color: #22c55e; }
+  .red { color: #ef4444; }
+  .yellow { color: #eab308; }
+  .dim { color: #64748b; }
+  .orange { color: #f97316; }
+
+  .arch-box {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 20px 28px;
+    margin: 6px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .arch-box .label { font-size: 1.15em; font-weight: 600; }
+  .arch-box .detail { font-size: 0.95em; color: #94a3b8; }
+  .arch-arrow { text-align: center; font-size: 1.4em; color: #475569; margin: 2px 0; }
+
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 1.05em; }
+  th { background: #1e293b; padding: 12px 18px; text-align: left; font-weight: 600; color: #94a3b8; border-bottom: 2px solid #334155; }
+  td { padding: 10px 18px; border-bottom: 1px solid #1e293b; color: #cbd5e1; }
+  tr:hover td { background: #1e293b40; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; }
+  .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; }
+
+  .metric-card { background: #1e293b; border-radius: 12px; padding: 20px; text-align: center; margin: 6px; }
+  .metric-card .value { font-size: 2.4em; font-weight: 700; }
+  .metric-card .label { font-size: 0.9em; color: #94a3b8; margin-top: 4px; }
+  .metrics-row { display: flex; gap: 12px; margin: 16px 0; }
+
+  .code-block {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 18px 22px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.95em;
+    line-height: 1.6;
+    color: #e2e8f0;
+    margin: 14px 0;
+    white-space: pre;
+    overflow-x: auto;
+  }
+
+  .callout {
+    padding: 18px 24px;
+    background: #1e293b;
+    border-radius: 8px;
+    margin: 16px 0;
+    font-size: 1.05em;
+  }
+  .callout-blue { border-left: 4px solid #3b82f6; }
+  .callout-yellow { border-left: 4px solid #eab308; }
+  .callout-green { border-left: 4px solid #22c55e; }
+  .callout-red { border-left: 4px solid #ef4444; }
+
+  .tag { display: inline-block; padding: 3px 10px; border-radius: 6px; font-size: 0.82em; font-weight: 600; margin: 2px; }
+  .tag-blue { background: #1e3a5f; color: #60a5fa; }
+  .tag-green { background: #14532d; color: #4ade80; }
+  .tag-red { background: #450a0a; color: #f87171; }
+  .tag-yellow { background: #422006; color: #fbbf24; }
+  .tag-gray { background: #1e293b; color: #94a3b8; }
+  .tag-orange { background: #431407; color: #fb923c; }
+
+  .flow-step {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin: 8px 0;
+  }
+  .flow-step .step-num { display: inline-block; background: #3b82f6; color: #fff; border-radius: 50%; width: 28px; height: 28px; text-align: center; line-height: 28px; font-weight: 700; font-size: 0.9em; margin-right: 10px; }
+
+  /* Navigation */
+  .nav { position: fixed; bottom: 28px; right: 36px; display: flex; gap: 10px; z-index: 100; }
+  .nav button {
+    background: #1e293b; border: 1px solid #334155; color: #e2e8f0;
+    padding: 9px 18px; border-radius: 8px; font-size: 0.95em; cursor: pointer; transition: background 0.2s;
+  }
+  .nav button:hover { background: #334155; }
+  .progress { position: fixed; bottom: 0; left: 0; height: 3px; background: #3b82f6; transition: width 0.3s; }
+  .slide-num { position: fixed; bottom: 34px; left: 36px; color: #475569; font-size: 0.9em; }
+</style>
+</head>
+<body>
+
+<!-- ===== Slide 1: Title ===== -->
+<div class="slide active" id="s1">
+  <div>
+    <h3>DataFog PII-NER v1</h3>
+    <h1>Full Training Pipeline</h1>
+    <p class="subtitle">From smoke test to 360K examples: data engineering, debugging, and design decisions</p>
+    <div style="margin-top: 44px; color: #475569; font-size: 1.05em;">
+      DeBERTa v3-xsmall &middot; CharCNN &middot; Gating Fusion &middot; CRF &nbsp;&middot;&nbsp; 71.1M parameters &nbsp;&middot;&nbsp; 163 BIO tags &nbsp;&middot;&nbsp; 3 datasets
+    </div>
+    <div style="margin-top: 20px;">
+      <span class="tag tag-green">Smoke test: PASSED (F1=0.992)</span>
+      <span class="tag tag-blue">Full training: IN PROGRESS</span>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Slide 2: Recap + What Changed ===== -->
+<div class="slide" id="s2">
+  <div>
+    <h2>From Smoke Test to Full Training</h2>
+    <p style="margin-bottom: 28px;">The smoke test validated model wiring on 100 AI4Privacy examples. Going to 360K requires solving three new problems.</p>
+    <div class="three-col">
+      <div class="flow-step">
+        <h3 style="color: #60a5fa;"><span class="step-num">1</span> Data Heterogeneity</h3>
+        <p style="font-size: 1em;">3 datasets use different formats. AI4Privacy has pre-tokenized tokens+tags. Nemotron and Gretel use raw text + character-offset spans.</p>
+      </div>
+      <div class="flow-step">
+        <h3 style="color: #60a5fa;"><span class="step-num">2</span> Label Normalization</h3>
+        <p style="font-size: 1em;">100+ source label names must map to 81 canonical entity types. "FIRSTNAME", "FIRST_NAME", "first_name", "PER" &rarr; all become PERSON.</p>
+      </div>
+      <div class="flow-step">
+        <h3 style="color: #60a5fa;"><span class="step-num">3</span> Optimizer Lifecycle</h3>
+        <p style="font-size: 1em;">Custom optimizer + HuggingFace Accelerate + mixed precision = gradient scaler crash. Needed architectural fix, not a config flag.</p>
+      </div>
+    </div>
+    <div class="callout callout-blue" style="margin-top: 24px;">
+      The smoke test is necessary but not sufficient. It tests model wiring. Full training tests data engineering, numerical stability at scale, and generalization.
+    </div>
+  </div>
+</div>
+
+<!-- ===== Slide 3: The Dataset Landscape ===== -->
+<div class="slide" id="s3">
+  <div>
+    <h2>The Dataset Landscape</h2>
+    <table style="font-size: 1.05em;">
+      <tr>
+        <th>Dataset</th>
+        <th>Source</th>
+        <th>Format</th>
+        <th>Size (English)</th>
+        <th>Key Entities</th>
+        <th>Annotation Style</th>
+      </tr>
+      <tr>
+        <td><strong>AI4Privacy</strong></td>
+        <td>ai4privacy/pii-masking-200k</td>
+        <td><span class="tag tag-green">Token</span></td>
+        <td>~200K</td>
+        <td>Name, Email, Phone, SSN, Address</td>
+        <td>Pre-tokenized words + NER tag arrays</td>
+      </tr>
+      <tr>
+        <td><strong>Nemotron-PII</strong></td>
+        <td>nvidia/Nemotron-PII</td>
+        <td><span class="tag tag-orange">Span</span></td>
+        <td>~100K</td>
+        <td>Person, Org, Location, DOB, Passport</td>
+        <td>Raw text + <code>{start, end, label}</code> dicts</td>
+      </tr>
+      <tr>
+        <td><strong>Gretel</strong></td>
+        <td>gretelai/synthetic_pii_finance_multilingual</td>
+        <td><span class="tag tag-orange">Span</span></td>
+        <td>~60K</td>
+        <td>IBAN, SWIFT, Account, Credit Card</td>
+        <td>Raw text + <code>{start, end, label}</code> dicts</td>
+      </tr>
+    </table>
+    <div class="two-col" style="margin-top: 20px;">
+      <div class="callout callout-yellow">
+        <span class="yellow">Language filtering:</span> AI4Privacy is English-only. Gretel is multilingual &mdash; filtered on <code>language == "English"</code>. Nemotron uses locale codes (<code>"us"</code>, <code>"intl"</code>), not language codes &mdash; both are English, so no filter needed.
+      </div>
+      <div class="callout callout-blue">
+        <span class="highlight">Why three datasets?</span> AI4Privacy has the most examples but limited financial PII. Gretel adds IBAN, SWIFT, and bank routing numbers. Nemotron adds organizational and biometric coverage.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Slide 4: Two Data Formats ===== -->
+<div class="slide" id="s4">
+  <div>
+    <h2>The Format Problem: Tokens vs Spans</h2>
+    <p style="margin-bottom: 24px;">The smoke test only used AI4Privacy (token format). Nemotron and Gretel use a fundamentally different representation.</p>
+    <div class="two-col">
+      <div>
+        <h3>Token-Based (AI4Privacy)</h3>
+        <div class="code-block" style="font-size: 0.9em;">{
+  "tokens": ["John", "Smith", "lives", "at", "123", "Main", "St"],
+  "ner_tags": ["B-PERSON", "I-PERSON", "O", "O",
+               "B-STREET_ADDRESS", "I-STREET_ADDRESS",
+               "I-STREET_ADDRESS"]
+}</div>
+        <p style="font-size: 0.95em; margin-top: 10px;">Already tokenized at word level. Tags align 1:1 with tokens. Direct input to <code>_tokenize_and_align()</code>.</p>
+      </div>
+      <div>
+        <h3>Span-Based (Nemotron, Gretel)</h3>
+        <div class="code-block" style="font-size: 0.9em;">{
+  "text": "John Smith lives at 123 Main St",
+  "spans": [
+    {"start": 0,  "end": 10, "label": "PERSON"},
+    {"start": 20, "end": 31, "label": "ADDRESS"}
+  ]
+}</div>
+        <p style="font-size: 0.95em; margin-top: 10px;">Raw text + character offsets. Must be whitespace-tokenized, then spans must be projected onto word boundaries to produce BIO tags.</p>
+      </div>
+    </div>
+    <div class="callout callout-red" style="margin-top: 16px;">
+      <span class="red">This was a blocking issue.</span> The original <code>load_single_dataset()</code> only supported token format. Nemotron and Gretel failed with <code>ValueError: Cannot find token column</code>. Both datasets loaded 0 examples in the initial attempt.
+    </div>
+  </div>
+</div>
+
+<!-- ===== Slide 5: Span-to-BIO Conversion ===== -->
+<div class="slide" id="s5">
+  <div>
+    <h2>Span-to-BIO Conversion</h2>
+    <p style="margin-bottom: 20px;">The <code>_spans_to_bio()</code> function converts character-offset spans to word-level BIO tags in four steps.</p>
+    <div class="two-col">
+      <div>
+        <div class="flow-step">
+          <h3 style="color: #60a5fa;"><span class="step-num">1</span> Whitespace Tokenize</h3>
+          <div class="code-block" style="font-size: 0.85em; margin: 8px 0;">text = "John Smith lives at 123 Main St"
+tokens  = ["John", "Smith", "lives", "at", "123", "Main", "St"]
+offsets = [(0,4), (5,10), (11,16), (17,19), (20,23), (24,28), (29,31)]</div>
+          <p style="font-size: 0.9em;">Regex <code>\S+</code> with <code>finditer()</code> captures both token text and character positions.</p>
+        </div>
+        <div class="flow-step">
+          <h3 style="color: #60a5fa;"><span class="step-num">2</span> Parse &amp; Validate Spans</h3>
+          <div class="code-block" style="font-size: 0.85em; margin: 8px 0;">spans = ast.literal_eval(spans_str)
+# Filter invalid, map labels, sort by start offset
+valid = [(0, 10, "PERSON"), (20, 31, "STREET_ADDRESS")]</div>
+          <p style="font-size: 0.9em;">Spans may be strings or lists. Invalid/unmapped labels are silently dropped to O.</p>
+        </div>
+      </div>
+      <div>
+        <div class="flow-step">
+          <h3 style="color: #60a5fa;"><span class="step-num">3</span> Project Spans onto Tokens</h3>
+          <div class="code-block" style="font-size: 0.85em; margin: 8px 0;">for each token (tok_start, tok_end):
+    if tok_start &ge; span_start and tok_start &lt; span_end:
+        if first_token_of_span: tag = "B-{label}"
+        else:                   tag = "I-{label}"</div>
+          <p style="font-size: 0.9em;">Linear scan with span pointer advancement. O(n+m) where n=tokens, m=spans.</p>
+        </div>
+        <div class="flow-step">
+          <h3 style="color: #60a5fa;"><span class="step-num">4</span> Feed to Existing Pipeline</h3>
+          <div class="code-block" style="font-size: 0.85em; margin: 8px 0;">tokens, bio_tags = _spans_to_bio(text, spans, dataset_name)
+# Same downstream as token format:
+return _tokenize_and_align(tokens, bio_tags, tokenizer)</div>
+          <p style="font-size: 0.9em;">Both formats converge to <code>(tokens, bio_tags)</code> &rarr; subword alignment.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Slide 6: Label Normalization ===== -->
+<div class="slide" id="s6">
+  <div>
+    <h2>Label Normalization: 100+ Names &rarr; 81 Types</h2>
+    <p style="margin-bottom: 20px;">Each dataset uses its own label vocabulary. We maintain per-dataset mapping dictionaries to a canonical set.</p>
+    <div class="two-col">
+      <div>
+        <h3>The Mapping Challenge</h3>
+        <table style="font-size: 0.95em;">
+          <tr><th>Source Label</th><th>Dataset</th><th>Canonical</th></tr>
+          <tr><td>FIRSTNAME</td><td>AI4Privacy</td><td>PERSON</td></tr>
+          <tr><td>FIRST_NAME</td><td>Nemotron</td><td>PERSON</td></tr>
+          <tr><td>first_name</td><td>Gretel</td><td>PERSON</td></tr>
+          <tr><td>PER</td><td>Nemotron</td><td>PERSON</td></tr>
+          <tr><td>FULLNAME</td><td>AI4Privacy</td><td>PERSON</td></tr>
+          <tr><td>CREDIT_DEBIT_CARD</td><td>Nemotron</td><td>CREDIT_CARD</td></tr>
+          <tr><td>credit_card_security_code</td><td>Gretel</td><td>CREDIT_CARD</td></tr>
+          <tr><td>swift_bic_code</td><td>Gretel</td><td>SWIFT_CODE</td></tr>
+          <tr><td>FAX_NUMBER</td><td>Nemotron</td><td>PHONE</td></tr>
+          <tr><td>api_key</td><td>Gretel</td><td>PASSWORD</td></tr>
+        </table>
+      </div>
+      <div>
+        <h3>Why Not Automatic Fuzzy Matching?</h3>
+        <ul>
+          <li>Ambiguity: <code>CITY</code> &rarr; LOCATION, but <code>ZIPCODE</code> &rarr; STREET_ADDRESS (different semantic levels)</li>
+          <li>Semantic merging: <code>FAX_NUMBER</code> and <code>PHONE_NUMBER</code> share one canonical type but the string distance is large</li>
+          <li>Scope decisions: <code>api_key</code> grouped with PASSWORD; reasonable people could disagree</li>
+          <li>Explicit maps let us audit and reproduce the decisions exactly</li>
+        </ul>
+        <div class="callout callout-blue" style="margin-top: 16px;">
+          <strong>Map sizes:</strong> AI4Privacy: 56 entries, Nemotron: 40 entries, Gretel: 33 entries. Unmapped labels fall through to <code>O</code> (outside).
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Slide 7: 4-Tier Label Taxonomy ===== -->
+<div class="slide" id="s7">
+  <div>
+    <h2>The 4-Tier PII Taxonomy</h2>
+    <p style="margin-bottom: 20px;">81 entity types organized by sensitivity. Each tier has a different recall target &mdash; miss tolerance decreases with severity.</p>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+      <div class="flow-step" style="border-left: 4px solid #ef4444;">
+        <h3 style="color: #ef4444;">Tier 1: Critical &mdash; Target &ge; 0.98 Recall</h3>
+        <p style="font-size: 0.95em;">SSN, Credit Card, Bank Account, Passport, Drivers License, Tax ID</p>
+        <p style="font-size: 0.85em; color: #94a3b8; margin-top: 6px;">Direct identifiers. A single miss = potential breach. Zero tolerance in production.</p>
+      </div>
+      <div class="flow-step" style="border-left: 4px solid #f97316;">
+        <h3 style="color: #f97316;">Tier 2: High Sensitivity &mdash; Target &ge; 0.95 Recall</h3>
+        <p style="font-size: 0.95em;">Person, Email, Phone, DOB, Street Address, IP Address</p>
+        <p style="font-size: 0.85em; color: #94a3b8; margin-top: 6px;">Strong identifiers. Can uniquely identify individuals alone or in combination.</p>
+      </div>
+      <div class="flow-step" style="border-left: 4px solid #3b82f6;">
+        <h3 style="color: #3b82f6;">Tier 3: Moderate &mdash; Target &ge; 0.90 Recall</h3>
+        <p style="font-size: 0.95em;">Username, Date, Location, Organization, URL, License Plate, Age, Nationality, Gender, Ethnicity, Religion, Marital Status</p>
+        <p style="font-size: 0.85em; color: #94a3b8; margin-top: 6px;">Contextual PII. Identifying in combination. Higher ambiguity (dates can be non-PII).</p>
+      </div>
+      <div class="flow-step" style="border-left: 4px solid #64748b;">
+        <h3 style="color: #94a3b8;">Tier 4: Domain-Specific &mdash; Target &ge; 0.85 Recall</h3>
+        <p style="font-size: 0.95em;">Medical Record, Employee ID, IBAN, SWIFT, PIN, Password, Biometric, Crypto Wallet, Insurance Number, Salary, and 11 more</p>
+        <p style="font-size: 0.85em; color: #94a3b8; margin-top: 6px;">Rare in general text. Lower recall target reflects expected data scarcity, not reduced importance.</p>
+      </div>
+    </div>
+    <div class="callout callout-yellow" style="margin-top: 16px;">
+      <span class="yellow">Design choice:</span> Tier 4 has a lower <em>target</em>, not a lower <em>priority</em>. With 360K examples, many Tier 4 types may have only hundreds of instances. The 0.85 target acknowledges the data scarcity constraint.
+    </div>
+  </div>
+</div>
+
+<!-- ===== Slide 8: The Gradient Scaler Bug ===== -->
+<div class="slide" id="s8">
+  <div>
+    <h2>The Gradient Scaler Bug</h2>
+    <p class="subtitle">A two-layer debugging story: the obvious fix failed, the real fix required understanding Accelerate internals.</p>
+    <div class="two-col">
+      <div>
+        <h3>Attempt 1: Switch to BF16</h3>
+        <div class="code-block" style="font-size: 0.85em;">ValueError: Attempting to unscale FP16 gradients.
+
+# Hypothesis: FP16 GradScaler clashes with CRF
+# Fix: Switch to bf16=True (A100 native, no scaler)
+training_args = TrainingArguments(
+    fp16=False,
+    bf16=True,  # A100 supports bf16 natively
+    ...
+)</div>
+        <p style="font-size: 0.95em; margin-top: 10px;"><span class="red">Result: Same crash.</span> BF16 shouldn't use a gradient scaler at all. Why was it still firing?</p>
+      </div>
+      <div>
+        <h3>Root Cause: Accelerate Optimizer Bypass</h3>
+        <div class="code-block" style="font-size: 0.85em;"># The real problem:
+trainer = PiiTrainer(
+    ...
+    optimizers=(custom_optimizer, None),  # &lt;-- THIS
+)
+
+# When you pass optimizers=(), Accelerate skips
+# its normal optimizer wrapping lifecycle:
+#
+# Normal: Trainer.create_optimizer()
+#   → Accelerate.prepare(optimizer)
+#     → Wraps optimizer for mixed precision
+#
+# Bypassed: raw optimizer goes straight to
+# training loop → gradient scaler sees raw
+# FP16 params → crash</div>
+      </div>
+    </div>
+    <div class="callout callout-red" style="margin-top: 16px;">
+      <span class="red">Key insight:</span> The bug wasn't about FP16 vs BF16. It was about <strong>who owns the optimizer</strong>. Passing <code>optimizers=(optimizer, None)</code> bypasses Accelerate's <code>prepare()</code> call, which handles gradient scaler integration. The fix is to let the Trainer create the optimizer via its normal lifecycle.
+    </div>
+  </div>
+</div>
+
+<!-- ===== Slide 9: The Fix ===== -->
+<div class="slide" id="s9">
+  <div>
+    <h2>The Fix: <code>create_optimizer()</code> Override</h2>
+    <p style="margin-bottom: 20px;">Instead of passing a custom optimizer from outside, we override the Trainer's optimizer creation hook.</p>
+    <div class="two-col">
+      <div>
+        <h3 style="color: #ef4444;">Before (Broken)</h3>
+        <div class="code-block" style="font-size: 0.85em;"><span style="color:#ef4444;"># External optimizer bypasses Accelerate</span>
+backbone = [p for n, p in model.named_parameters()
+            if "deberta" in n]
+head = [p for n, p in model.named_parameters()
+        if "deberta" not in n]
+optimizer = AdamW([
+    {"params": backbone, "lr": 2e-5},
+    {"params": head,     "lr": 1e-3},
+])
+
+trainer = PiiTrainer(
+    ...,
+    optimizers=(optimizer, None),  <span style="color:#ef4444;">## BUG</span>
+)</div>
+      </div>
+      <div>
+        <h3 style="color: #22c55e;">After (Fixed)</h3>
+        <div class="code-block" style="font-size: 0.85em;"><span style="color:#22c55e;"># PiiTrainer creates optimizer internally</span>
+class PiiTrainer(Trainer):
+    def __init__(self, *args,
+                 lr_backbone=None,
+                 lr_head=None, **kwargs):
+        self.lr_backbone = lr_backbone
+        self.lr_head = lr_head
+        super().__init__(*args, **kwargs)
+
+    def create_optimizer(self):
+        backbone = [p for n, p in
+            self.model.named_parameters()
+            if "deberta" in n and p.requires_grad]
+        head = [p for n, p in
+            self.model.named_parameters()
+            if "deberta" not in n and p.requires_grad]
+        self.optimizer = AdamW([
+            {"params": backbone, "lr": self.lr_backbone},
+            {"params": head,     "lr": self.lr_head},
+        ], weight_decay=self.args.weight_decay)
+        return self.optimizer</div>
+      </div>
+    </div>
+    <div class="callout callout-green" style="margin-top: 12px;">
+      <span class="green">Why this works:</span> <code>create_optimizer()</code> is called by <code>Trainer.train()</code> <em>after</em> <code>Accelerate.prepare()</code> has set up the training context. The optimizer is properly wrapped for mixed precision before the first forward pass.
+    </div>
+  </div>
+</div>
+
+<!-- ===== Slide 10: Mixed Precision Strategy ===== -->
+<div class="slide" id="s10">
+  <div>
+    <h2>Mixed Precision + CRF: A Delicate Balance</h2>
+    <p style="margin-bottom: 20px;">The CRF head computes log-sum-exp over 163&times;163 transition matrices. This is numerically unstable in half precision.</p>
+    <div class="two-col">
+      <div>
+        <h3>The Three-Layer Defense</h3>
+        <div class="flow-step" style="border-left: 3px solid #3b82f6;">
+          <p style="font-size: 1em;"><strong>Layer 1: Force FP32 before CRF</strong></p>
+          <div class="code-block" style="font-size: 0.82em; margin: 6px 0;">fused = fused.float()  # Cast to FP32</div>
+          <p style="font-size: 0.85em; color: #94a3b8;">Ensures CRF input is FP32 regardless of autocast state.</p>
+        </div>
+        <div class="flow-step" style="border-left: 3px solid #3b82f6;">
+          <p style="font-size: 1em;"><strong>Layer 2: Disable autocast in CRF</strong></p>
+          <div class="code-block" style="font-size: 0.82em; margin: 6px 0;">with torch.amp.autocast(
+    device_type=fused.device.type,
+    enabled=False):
+    crf_output = self.crf_head(...)</div>
+          <p style="font-size: 0.85em; color: #94a3b8;">Prevents autocast from recasting <code>nn.Linear</code> weights back to FP16 inside the CRF.</p>
+        </div>
+        <div class="flow-step" style="border-left: 3px solid #3b82f6;">
+          <p style="font-size: 1em;"><strong>Layer 3: BF16 on capable hardware</strong></p>
+          <p style="font-size: 0.85em; color: #94a3b8;">BF16 has the same exponent range as FP32 (8 bits), avoiding overflow in log-sum-exp. No gradient scaler needed.</p>
+        </div>
+      </div>
+      <div>
+        <h3>Precision Comparison</h3>
+        <table style="font-size: 0.95em;">
+          <tr><th>Format</th><th>Exponent</th><th>Mantissa</th><th>Range</th><th>Scaler?</th></tr>
+          <tr><td>FP32</td><td>8 bits</td><td>23 bits</td><td>~3.4&times;10<sup>38</sup></td><td>No</td></tr>
+          <tr><td><span class="green">BF16</span></td><td>8 bits</td><td>7 bits</td><td>~3.4&times;10<sup>38</sup></td><td>No</td></tr>
+          <tr><td><span class="yellow">FP16</span></td><td>5 bits</td><td>10 bits</td><td>~6.5&times;10<sup>4</sup></td><td>Yes</td></tr>
+        </table>
+        <div class="callout callout-yellow" style="margin-top: 16px;">
+          <span class="yellow">FP16 CRF failure mode:</span> Transition scores for 163 labels easily exceed FP16 range (65504) in the log-sum-exp computation, producing <code>inf</code> &rarr; <code>NaN</code> loss.
+        </div>
+        <h3 style="margin-top: 20px;">GPU Auto-Detection</h3>
+        <div class="code-block" style="font-size: 0.82em; margin: 6px 0;">gpu_mem = torch.cuda.get_device_properties(0).total_memory
+if gpu_mem / 1e9 >= 20:  # A100, H100
+    bf16=True, fp16=False
+else:                     # T4, V100
+    bf16=False, fp16=True  # FP32 CRF is the safety net</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Slide 11: Training Configuration ===== -->
+<div class="slide" id="s11">
+  <div>
+    <h2>Training Configuration</h2>
+    <div class="two-col">
+      <div>
+        <h3>Hyperparameters</h3>
+        <table style="font-size: 1em;">
+          <tr><td>Backbone</td><td><strong>DeBERTa-v3-xsmall</strong> (70.7M)</td></tr>
+          <tr><td>Backbone LR</td><td><strong>2e-5</strong></td></tr>
+          <tr><td>Head LR</td><td><strong>1e-3</strong> (50x ratio)</td></tr>
+          <tr><td>LR Schedule</td><td>Linear decay + 10% warmup</td></tr>
+          <tr><td>Weight Decay</td><td>0.01</td></tr>
+          <tr><td>Epochs</td><td>10</td></tr>
+          <tr><td>Effective Batch</td><td>32 (A100) / 32 (T4: 8&times;4 accum)</td></tr>
+          <tr><td>Max Seq Len</td><td>256 tokens</td></tr>
+          <tr><td>Mixed Precision</td><td>BF16 (A100) / FP16 (T4)</td></tr>
+          <tr><td>Optimizer</td><td>AdamW (differential groups)</td></tr>
+          <tr><td>Eval Strategy</td><td>Every epoch</td></tr>
+          <tr><td>Best Model</td><td>By <code>overall_f1</code></td></tr>
+        </table>
+      </div>
+      <div>
+        <h3>Why These Choices</h3>
+        <ul>
+          <li><strong>50x LR ratio:</strong> Validated in smoke test &mdash; DeBERTa representations must be preserved while CRF transitions (163&times;163 matrix) need aggressive learning</li>
+          <li><strong>10 epochs:</strong> With 360K examples and effective batch 32, each epoch is ~11,250 steps. 10 epochs = ~112K steps &mdash; well within the typical fine-tuning budget</li>
+          <li><strong>256 seq len:</strong> Covers 95%+ of PII-containing text. Longer sequences have diminishing returns and quadratic attention cost</li>
+          <li><strong>Linear schedule:</strong> Standard for NER fine-tuning. Cosine provides marginal benefit for <20 epoch runs</li>
+          <li><strong>save_total_limit=3:</strong> Keeps 3 best checkpoints. With ~5GB per checkpoint, this prevents disk exhaustion on Colab</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Slide 12: Data Pipeline ===== -->
+<div class="slide" id="s12">
+  <div>
+    <h2>The Complete Data Pipeline</h2>
+    <p style="margin-bottom: 20px;">From raw HuggingFace datasets to padded tensors, every example passes through the same pipeline.</p>
+    <div style="max-width: 850px;">
+      <div class="arch-box">
+        <div>
+          <div class="label">HuggingFace Hub</div>
+          <div class="detail">3 datasets downloaded via <code>load_dataset()</code></div>
+        </div>
+        <div><span class="tag tag-gray">Raw</span></div>
+      </div>
+      <div class="arch-arrow">&darr; Language filtering (Gretel: English only)</div>
+      <div class="arch-box">
+        <div>
+          <div class="label">Format Detection</div>
+          <div class="detail">Token format &rarr; <code>_detect_columns()</code> + <code>_normalize_tags()</code><br>Span format &rarr; <code>_spans_to_bio()</code></div>
+        </div>
+        <div><span class="tag tag-blue">Normalize</span></div>
+      </div>
+      <div class="arch-arrow">&darr; Both converge to (tokens: list[str], bio_tags: list[str])</div>
+      <div class="arch-box">
+        <div>
+          <div class="label">Subword Tokenization + Label Alignment</div>
+          <div class="detail"><code>_tokenize_and_align()</code>: DeBERTa tokenizer splits words to subwords.<br>First subword &rarr; original BIO tag. Continuations &rarr; I- tag. Special tokens &rarr; -100.</div>
+        </div>
+        <div><span class="tag tag-blue">Align</span></div>
+      </div>
+      <div class="arch-arrow">&darr; + Character IDs via text_to_char_ids()</div>
+      <div class="arch-box">
+        <div>
+          <div class="label">Concatenate + Split</div>
+          <div class="detail">All 3 datasets combined, then split: 80% train / 10% val / 10% test</div>
+        </div>
+        <div><span class="tag tag-green">Ready</span></div>
+      </div>
+      <div class="arch-arrow">&darr; PiiDataCollator pads to batch max length</div>
+      <div class="arch-box" style="border-color: #3b82f6;">
+        <div>
+          <div class="label" style="color: #60a5fa;">Batch Tensors</div>
+          <div class="detail">input_ids (B, L) &middot; attention_mask (B, L) &middot; labels (B, L) &middot; char_ids (B, L, 20)</div>
+        </div>
+        <div><span class="tag tag-green">GPU</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Slide 13: Quick Validation ===== -->
+<div class="slide" id="s13">
+  <div>
+    <h2>Pre-Flight Validation: Test Without Data</h2>
+    <p style="margin-bottom: 20px;">Downloading and processing 360K examples takes 10-15 minutes. We added a synthetic data validation step to catch pipeline bugs before that investment.</p>
+    <div class="two-col">
+      <div>
+        <h3>The Validation Cell</h3>
+        <div class="code-block" style="font-size: 0.82em;"># 16 random examples, seq_len=32
+_fake_data = {
+    "input_ids": np.random.randint(1, 1000, (16, 32)),
+    "attention_mask": np.ones((16, 32)),
+    "labels": np.random.randint(0, NUM_LABELS, (16, 32)),
+    "char_ids": np.random.randint(0, 100, (16, 32, 20)),
+}
+
+_trainer = PiiTrainer(
+    model=_model, args=_args,
+    train_dataset=Dataset.from_dict(_fake_data),
+    lr_backbone=2e-5, lr_head=1e-3,
+)
+_result = _trainer.train()  # 3 steps only</div>
+      </div>
+      <div>
+        <h3>What It Tests</h3>
+        <ul>
+          <li><strong>Optimizer creation:</strong> <code>create_optimizer()</code> runs with differential LRs</li>
+          <li><strong>Mixed precision:</strong> Accelerate wraps the optimizer correctly for bf16/fp16</li>
+          <li><strong>Forward pass:</strong> CRF loss computation doesn't produce NaN</li>
+          <li><strong>Backward pass:</strong> Gradient scaler doesn't crash on unscaling</li>
+          <li><strong>3 full steps:</strong> Enough to exercise the entire training loop including gradient accumulation</li>
+        </ul>
+        <div class="callout callout-green" style="margin-top: 16px;">
+          <span class="green">This caught the gradient scaler bug</span> that previously only surfaced 15 minutes into training (after data download + processing). Saves ~$1 of A100 time per failed attempt.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Slide 14: What to Expect ===== -->
+<div class="slide" id="s14">
+  <div>
+    <h2>What to Expect During Training</h2>
+    <p style="margin-bottom: 20px;">Based on the smoke test learning dynamics and comparable NER fine-tuning runs.</p>
+    <div class="two-col">
+      <div>
+        <h3>Expected Training Curve</h3>
+        <table style="font-size: 0.95em;">
+          <tr><th>Epoch</th><th>Expected Loss</th><th>Expected F1</th><th>What's Happening</th></tr>
+          <tr><td>1</td><td>30&ndash;80</td><td>0.10&ndash;0.30</td><td>CRF learning O transitions; common entities emerge</td></tr>
+          <tr><td>2&ndash;3</td><td>10&ndash;30</td><td>0.40&ndash;0.65</td><td>Tier 1/2 entities solidifying</td></tr>
+          <tr><td>4&ndash;6</td><td>5&ndash;15</td><td>0.70&ndash;0.85</td><td>Tier 3 types emerging; diminishing returns starting</td></tr>
+          <tr><td>7&ndash;10</td><td>2&ndash;8</td><td>0.82&ndash;0.92</td><td>Tier 4 rare types; plateau or mild overfitting</td></tr>
+        </table>
+        <p style="font-size: 0.9em; color: #94a3b8; margin-top: 10px;">CRF loss is sequence-level NLL. Values of 2&ndash;10 at convergence are normal.</p>
+      </div>
+      <div>
+        <h3>Red Flags to Watch For</h3>
+        <ul>
+          <li><span class="red">Loss &gt; 50 after epoch 2:</span> Learning rate may be too low, or data loading issue</li>
+          <li><span class="red">NaN loss:</span> FP16 overflow in CRF (should be prevented by our FP32 defense)</li>
+          <li><span class="red">F1 = 0 after epoch 3:</span> All-O trap &mdash; backbone representations being destroyed</li>
+          <li><span class="yellow">Eval loss rising while train loss drops:</span> Overfitting &mdash; may want early stopping</li>
+          <li><span class="yellow">Tier 4 recall &lt; 0.5:</span> Expected due to data scarcity. May need class-weighted sampling</li>
+        </ul>
+        <h3 style="margin-top: 20px;">Compute Budget</h3>
+        <p style="font-size: 0.95em;">A100: ~30 min/epoch &times; 10 = ~5 hours<br>~5.37 CU/hr &times; 5 = ~27 compute units</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Slide 15: Architecture Decisions ===== -->
+<div class="slide" id="s15">
+  <div>
+    <h2>Architecture Decision Record</h2>
+    <p style="margin-bottom: 16px;">Key decisions and their rationale, for the paper's methodology section.</p>
+    <table style="font-size: 0.95em;">
+      <tr><th style="width: 22%;">Decision</th><th style="width: 20%;">Choice</th><th>Rationale</th><th style="width: 20%;">Alternatives Considered</th></tr>
+      <tr>
+        <td>Backbone</td>
+        <td>DeBERTa-v3-xsmall</td>
+        <td>Best sub-100M model on NER benchmarks. Disentangled attention handles entity boundaries well. V3 uses ELECTRA-style pretraining (more sample efficient than MLM).</td>
+        <td>BERT-base (355M, overkill), DistilBERT (66M, worse NER F1)</td>
+      </tr>
+      <tr>
+        <td>Character encoder</td>
+        <td>CharCNN (3/4/5-gram)</td>
+        <td>Captures format patterns (XXX-XX-XXXX for SSN, ###-###-#### for phone) that subword tokenizers fragment. Additive cost: ~100K params.</td>
+        <td>CharLSTM (slower), no char encoder (misses format patterns)</td>
+      </tr>
+      <tr>
+        <td>Fusion</td>
+        <td>Learned gating</td>
+        <td>Per-token gate learns when to trust character vs context signal. Better than concatenation for handling tokens where one signal is noise.</td>
+        <td>Concatenation, addition, cross-attention (too expensive)</td>
+      </tr>
+      <tr>
+        <td>Output head</td>
+        <td>CRF</td>
+        <td>Enforces valid BIO sequences globally. Critical for multi-token entities (addresses, passwords). +2-4 F1 over independent softmax on NER.</td>
+        <td>Softmax (simpler but worse boundaries), biaffine (over-parameterized for BIO)</td>
+      </tr>
+      <tr>
+        <td>Training data</td>
+        <td>3-dataset mix</td>
+        <td>AI4Privacy: volume. Nemotron: synthetic diversity. Gretel: financial PII coverage. Combined: broadest coverage for 81 entity types.</td>
+        <td>Single dataset (gaps in coverage), 5+ datasets (diminishing returns, more label noise)</td>
+      </tr>
+    </table>
+  </div>
+</div>
+
+<!-- ===== Slide 16: FAQ ===== -->
+<div class="slide" id="s16">
+  <div>
+    <h2>FAQ: Data Engineering</h2>
+    <div class="two-col">
+      <div>
+        <div class="callout callout-blue" style="margin-bottom: 16px;">
+          <strong style="color: #60a5fa;">Q: Why whitespace tokenization for spans instead of spaCy or stanza?</strong><br>
+          Span annotations use character offsets into the raw text. Whitespace tokenization with regex <code>\S+</code> preserves exact character positions. spaCy's tokenizer splits punctuation and contractions differently, which can misalign character offsets. We need alignment, not linguistic quality.
+        </div>
+        <div class="callout callout-blue" style="margin-bottom: 16px;">
+          <strong style="color: #60a5fa;">Q: What happens when a span boundary falls mid-word?</strong><br>
+          The overlap check uses <code>tok_start &ge; span_start and tok_start &lt; span_end</code>. If a span starts mid-word, the entire word gets the B- tag (conservative: over-tags rather than under-tags). This is rare in practice since span annotators typically respect word boundaries.
+        </div>
+        <div class="callout callout-blue">
+          <strong style="color: #60a5fa;">Q: Why <code>ast.literal_eval()</code> instead of <code>json.loads()</code>?</strong><br>
+          Gretel's span column stores Python list-of-dict representations with single quotes: <code>[{'start': 0, 'end': 5, ...}]</code>. <code>json.loads()</code> requires double quotes and would fail. <code>ast.literal_eval()</code> handles both formats safely.
+        </div>
+      </div>
+      <div>
+        <div class="callout callout-blue" style="margin-bottom: 16px;">
+          <strong style="color: #60a5fa;">Q: Why not use the datasets' native label IDs?</strong><br>
+          Each dataset has its own label vocabulary with different ordering and granularity. AI4Privacy uses 40+ labels, Nemotron uses 30+, Gretel uses 25+. We need a single consistent ID space across all datasets. The canonical mapping also lets us decide semantic granularity (e.g., CITY and STATE both map to LOCATION).
+        </div>
+        <div class="callout callout-blue" style="margin-bottom: 16px;">
+          <strong style="color: #60a5fa;">Q: How are unmapped labels handled?</strong><br>
+          <code>map_label()</code> returns <code>None</code> for unrecognized labels, which <code>_normalize_tags()</code> converts to <code>"O"</code>. This means rare or dataset-specific labels (e.g., <code>BUILDING_NUMBER</code>) are treated as non-entities rather than crashing. We log unmapped labels for auditing.
+        </div>
+        <div class="callout callout-blue">
+          <strong style="color: #60a5fa;">Q: Why 80/10/10 split instead of fixed test set?</strong><br>
+          No established PII NER benchmark exists (unlike CoNLL-03 for general NER). We create our own held-out test set from the combined data. 10% of 360K = ~36K test examples &mdash; large enough for stable per-entity-type metrics.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Slide 17: FAQ Optimizer ===== -->
+<div class="slide" id="s17">
+  <div>
+    <h2>FAQ: Optimizer &amp; Training</h2>
+    <div class="two-col">
+      <div>
+        <div class="callout callout-blue" style="margin-bottom: 16px;">
+          <strong style="color: #60a5fa;">Q: Why not use <code>optimizers=()</code> and just be careful with Accelerate?</strong><br>
+          The Accelerate integration is an implementation detail of HuggingFace Trainer that can change between versions. <code>create_optimizer()</code> is the documented hook for custom optimizers. Using the public API means our code survives Trainer/Accelerate upgrades without silent breakage.
+        </div>
+        <div class="callout callout-blue" style="margin-bottom: 16px;">
+          <strong style="color: #60a5fa;">Q: Why AdamW and not AdaFactor or LAMB?</strong><br>
+          AdamW is the standard optimizer for transformer fine-tuning. AdaFactor saves memory (no second moment) but can be unstable with small batch sizes. LAMB is designed for large-batch training (&ge;4K). With effective batch size 32, AdamW is the safe choice.
+        </div>
+        <div class="callout callout-blue">
+          <strong style="color: #60a5fa;">Q: Why 50x LR ratio specifically?</strong><br>
+          Derived empirically from the smoke test. Standard NER fine-tuning uses 2e-5&ndash;5e-5 for the backbone. The CRF head starts from random initialization with a 163&times;163 transition matrix &mdash; it needs aggressive learning. 1e-3 is a standard "train from scratch" LR. The 50x ratio ensures the backbone is gently tuned while the head learns fast.
+        </div>
+      </div>
+      <div>
+        <div class="callout callout-blue" style="margin-bottom: 16px;">
+          <strong style="color: #60a5fa;">Q: The CRF forces FP32 computation. Doesn't this negate the speed benefit of mixed precision?</strong><br>
+          The CRF head is ~438K params out of 71.1M total (&lt;1%). DeBERTa's self-attention and feed-forward layers (99% of compute) still run in BF16. The FP32 CRF adds negligible overhead. Benchmarks show &lt;3% wall-clock difference vs all-BF16 (if it didn't crash).
+        </div>
+        <div class="callout callout-blue" style="margin-bottom: 16px;">
+          <strong style="color: #60a5fa;">Q: Why <code>remove_unused_columns=False</code>?</strong><br>
+          HuggingFace Trainer automatically removes dataset columns that aren't in the model's <code>forward()</code> signature. Our model expects <code>char_ids</code>, which isn't a standard transformer input. Without this flag, <code>char_ids</code> gets silently dropped and the CharCNN receives no input.
+        </div>
+        <div class="callout callout-blue">
+          <strong style="color: #60a5fa;">Q: Why not learning rate warmup steps instead of warmup ratio?</strong><br>
+          Warmup ratio (0.1 = 10% of total steps) is dataset-size agnostic. The same config works for 100 examples (smoke test) and 360K (full training) without recalculation. Note: recent Transformers versions show a deprecation warning for <code>warmup_ratio</code> in favor of <code>warmup_steps</code> &mdash; both work equivalently.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Slide 18: FAQ Model ===== -->
+<div class="slide" id="s18">
+  <div>
+    <h2>FAQ: Model Architecture</h2>
+    <div class="two-col">
+      <div>
+        <div class="callout callout-blue" style="margin-bottom: 16px;">
+          <strong style="color: #60a5fa;">Q: Why DeBERTa-v3-xsmall instead of -small or -base?</strong><br>
+          The xsmall variant (70.7M params, 384 hidden dim) is the best tradeoff for serving PII detection at scale. At inference, this model will process millions of documents. The -base variant (86M, 768 hidden) is 2&times; slower with only marginal F1 improvement on NER benchmarks. We can always distill a -base model down later.
+        </div>
+        <div class="callout callout-blue" style="margin-bottom: 16px;">
+          <strong style="color: #60a5fa;">Q: How does the gating fusion work?</strong><br>
+          For each token position, a learned gate <code>g = &sigma;(W[char; context] + b)</code> produces a scalar in [0,1]. The fused representation is <code>g &middot; char + (1-g) &middot; context</code>. The gate learns to trust character features for format-heavy entities (SSN, credit card) and context features for semantic entities (person names, organizations).
+        </div>
+        <div class="callout callout-blue">
+          <strong style="color: #60a5fa;">Q: What are the CharCNN filter widths (3,4,5) capturing?</strong><br>
+          Width-3: digit trigrams (123), punctuation patterns (X-X). Width-4: common prefixes/suffixes, year patterns (2024). Width-5: format signatures (XXX-XX = SSN prefix, ###-## = ZIP). The multi-width design lets the model learn patterns at different character scales simultaneously.
+        </div>
+      </div>
+      <div>
+        <div class="callout callout-blue" style="margin-bottom: 16px;">
+          <strong style="color: #60a5fa;">Q: Why CRF instead of constrained decoding?</strong><br>
+          Constrained decoding (e.g., masking invalid transitions at inference) prevents illegal sequences but doesn't learn transition preferences. The CRF learns that <code>B-PERSON &rarr; I-PERSON</code> is much more likely than <code>B-PERSON &rarr; I-EMAIL</code>. This soft constraint improves boundary detection even when emission scores are ambiguous.
+        </div>
+        <div class="callout callout-blue" style="margin-bottom: 16px;">
+          <strong style="color: #60a5fa;">Q: 163 BIO tags seems like a lot. Is the CRF transition matrix too large?</strong><br>
+          The transition matrix is 163&times;163 = 26,569 parameters. This is tiny compared to the model's 71M total. Many transitions are effectively zero (B-SSN &rarr; I-PERSON never happens), so the matrix is very sparse in practice. The Viterbi decode is O(T&times;K&sup2;) where T=seq_len, K=163 &mdash; still fast at ~2ms per sequence.
+        </div>
+        <div class="callout callout-blue">
+          <strong style="color: #60a5fa;">Q: What's the <code>prediction_step</code> override doing?</strong><br>
+          The standard Trainer expects logits from the model and applies argmax. Our model returns CRF-decoded predictions (Viterbi best path), which are already discrete label IDs. The override extracts <code>output.predictions</code> directly instead of applying argmax to logits.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Slide 19: Competitive Landscape ===== -->
+<div class="slide" id="s19">
+  <div>
+    <h2>Competitive Landscape</h2>
+    <p style="margin-bottom: 20px;">Where DataFog PII-NER v1 fits relative to existing solutions.</p>
+    <table style="font-size: 0.95em;">
+      <tr><th>System</th><th>Approach</th><th>Speed</th><th>Entity Types</th><th>Customizable</th><th>Notes</th></tr>
+      <tr>
+        <td><strong style="color: #60a5fa;">DataFog PII-NER v1</strong></td>
+        <td>DeBERTa + CharCNN + CRF</td>
+        <td>~2ms/seq (ONNX target)</td>
+        <td>81</td>
+        <td>Full fine-tuning</td>
+        <td>Open source, ONNX-exportable, tier-based recall targets</td>
+      </tr>
+      <tr>
+        <td>Microsoft Presidio</td>
+        <td>Rule-based + spaCy NER</td>
+        <td>Fast</td>
+        <td>~20</td>
+        <td>Add regex rules</td>
+        <td>No ML for most types. Good precision, limited recall on novel patterns.</td>
+      </tr>
+      <tr>
+        <td>GLiNER 2</td>
+        <td>Zero-shot NER</td>
+        <td>~50ms/seq</td>
+        <td>Any (prompt-based)</td>
+        <td>Via prompts</td>
+        <td>Flexible but slow. 25x our target latency. No CRF boundary enforcement.</td>
+      </tr>
+      <tr>
+        <td>Stanza / Flair NER</td>
+        <td>BiLSTM-CRF</td>
+        <td>~10ms/seq</td>
+        <td>4&ndash;18</td>
+        <td>Fine-tuning</td>
+        <td>Strong baselines but limited PII-specific types. No character encoder.</td>
+      </tr>
+      <tr>
+        <td>Private AI</td>
+        <td>Proprietary</td>
+        <td>Unknown</td>
+        <td>~50</td>
+        <td>No</td>
+        <td>Commercial. Closed source. API-only.</td>
+      </tr>
+    </table>
+    <div class="callout callout-green" style="margin-top: 16px;">
+      <strong>Our differentiator:</strong> Widest open-source PII entity coverage (81 types), CRF-enforced boundary consistency, CharCNN for format pattern detection, and ONNX-exportable for sub-5ms inference. The combination of breadth + speed + open source doesn't exist yet.
+    </div>
+  </div>
+</div>
+
+<!-- ===== Slide 20: Next Steps ===== -->
+<div class="slide" id="s20">
+  <div>
+    <h2>What Comes After Training</h2>
+    <div class="three-col">
+      <div>
+        <h3 style="color: #60a5fa;">Phase 2: Inference &amp; Export</h3>
+        <ul style="font-size: 0.95em;">
+          <li>ONNX export with dynamic axes</li>
+          <li>Inference API with batch support</li>
+          <li>Latency benchmarks (target: &lt;5ms/seq)</li>
+          <li>Quantization experiments (INT8)</li>
+          <li>HuggingFace Hub model card</li>
+        </ul>
+      </div>
+      <div>
+        <h3 style="color: #60a5fa;">Phase 3: Hardening</h3>
+        <ul style="font-size: 0.95em;">
+          <li>Adversarial evaluation (obfuscated PII)</li>
+          <li>Cross-domain generalization tests</li>
+          <li>Error analysis by entity type</li>
+          <li>Confidence calibration</li>
+          <li>Data augmentation for rare Tier 4 types</li>
+        </ul>
+      </div>
+      <div>
+        <h3 style="color: #60a5fa;">Phase 4: Paper &amp; Release</h3>
+        <ul style="font-size: 0.95em;">
+          <li>EMNLP/ACL 2026 submission</li>
+          <li>Benchmark vs Presidio, GLiNER2</li>
+          <li>Ablation studies (CharCNN, CRF, gating)</li>
+          <li>DataFog SDK integration</li>
+          <li>Community feedback loop</li>
+        </ul>
+      </div>
+    </div>
+    <div style="margin-top: 32px; padding: 24px; background: #1e293b; border-radius: 12px; text-align: center;">
+      <p style="font-size: 1.5em; font-weight: 600; color: #f8fafc; margin-bottom: 8px;">
+        Current Status: Full Training in Progress
+      </p>
+      <p style="font-size: 1.1em; color: #94a3b8;">
+        360K+ examples &middot; 10 epochs &middot; A100 GPU &middot; WandB tracking &middot; ~5 hours to results
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- Navigation -->
+<div class="nav">
+  <button onclick="prev()">&larr; Prev</button>
+  <button onclick="next()">Next &rarr;</button>
+</div>
+<div class="progress" id="progress"></div>
+<div class="slide-num" id="slideNum"></div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  let current = 0;
+
+  function show(n) {
+    slides[current].classList.remove('active');
+    current = Math.max(0, Math.min(n, slides.length - 1));
+    slides[current].classList.add('active');
+    document.getElementById('progress').style.width = ((current + 1) / slides.length * 100) + '%';
+    document.getElementById('slideNum').textContent = (current + 1) + ' / ' + slides.length;
+  }
+
+  function next() { show(current + 1); }
+  function prev() { show(current - 1); }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); next(); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); prev(); }
+  });
+
+  show(0);
+</script>
+</body>
+</html>
