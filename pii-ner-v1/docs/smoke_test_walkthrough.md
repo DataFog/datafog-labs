@@ -195,3 +195,65 @@ Updated thresholds:
 | Verdict | Complete failure | PASS |
 
 **The lesson:** When combining pretrained and randomly initialized components, differential learning rates aren't optional — they're essential. The pretrained backbone needs preservation; the new head needs speed.
+
+---
+
+## AdamW NaN on Full Training (PyTorch 2.9+)
+
+When scaling from 100 smoke-test examples to 135K+ real examples, training immediately produced NaN loss. Every metric was zero from epoch 1. This section documents the diagnosis and fix.
+
+### Symptoms
+
+- Training loss displayed as `0.000000` (HF Trainer v5.0 renders NaN as 0)
+- Validation loss: `nan`
+- All F1 scores: `0.000`
+- Loss was valid at step 1 (~490–920), then NaN from step 2 onward
+
+### Root Cause: AdamW Bias-Correction Amplification
+
+AdamW's adaptive per-parameter scaling makes the effective update magnitude **independent of gradient magnitude**:
+
+```
+At step 1 with bias correction:
+  m_hat = g                    (first moment, bias-corrected)
+  v_hat = g²                   (second moment, bias-corrected)
+  update = lr * g / (|g| + ε)  ≈ lr × sign(g)
+```
+
+With standard `ε=1e-8`, every backbone weight changes by ≈ ±lr (≈ ±2e-5) regardless of gradient clipping. While ±2e-5 seems small, it was sufficient to push DeBERTa v3's internal computations into NaN territory on PyTorch 2.9+ with CUDA.
+
+Manual SGD (`p -= lr * clipped_grad`) produces updates ~8000× smaller because it preserves the clipped gradient magnitude: ≈ lr × |g_clipped| ≈ 2e-5 × 1.2e-4 ≈ 2.4e-9 per weight.
+
+### Diagnostic Evidence
+
+| Test | Result | Conclusion |
+|------|--------|------------|
+| Default AdamW (eps=1e-8) | NaN at step 2 | Baseline fails |
+| Reference AdamW (fused=False, foreach=False) | NaN at step 2 | Not a CUDA kernel bug |
+| Manual SGD (p -= lr * grad) | 3 steps OK | Raw weight updates are safe |
+| Frozen DeBERTa (head only) | 5 steps OK, loss 496→291 | Head learns without backbone |
+| **AdamW with eps=1.0 for backbone** | **10 steps OK, loss 480→149** | **Fix confirmed** |
+
+### The Fix
+
+Set `eps=1.0` for the backbone parameter group in AdamW. This dampens the adaptive scaling so updates scale with gradient magnitude (like SGD) rather than being a fixed ±lr:
+
+```python
+# In PiiTrainer.create_optimizer():
+self.optimizer = AdamW([
+    {"params": backbone_params, "lr": 2e-5, "eps": 1.0},   # SGD-like
+    {"params": head_params,     "lr": 1e-3},                # standard AdamW
+], weight_decay=0.01)
+```
+
+With `eps=1.0` and clipped gradients (`|g| < 1.0`):
+```
+denom = |g| + 1.0 ≈ 1.0
+update ≈ lr × g       (same as SGD — scales with gradient magnitude)
+```
+
+The head retains standard AdamW (`eps=1e-8`) because it's randomly initialized and benefits from adaptive scaling. The backbone gets SGD-like updates because pretrained weights need minimal, gradient-proportional adjustments.
+
+### Why the Smoke Test Passed
+
+The smoke test used 100 examples with a different Colab environment (older PyTorch/Transformers). The NaN manifests specifically on real data at scale with PyTorch 2.9+ and Transformers 5.0. The CRF loss on real data (~490) is comparable to the smoke test's initial loss (~362), so the scale of loss is not the differentiator — the PyTorch version and its optimizer internals are.

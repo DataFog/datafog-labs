@@ -33,7 +33,15 @@ class PiiTrainer(Trainer):
         super().__init__(*args, **kwargs)
 
     def create_optimizer(self):
-        """Create AdamW with differential learning rates for backbone vs head."""
+        """Create AdamW with differential learning rates for backbone vs head.
+
+        The backbone group uses eps=1.0 to dampen AdamW's adaptive per-parameter
+        scaling. Without this, AdamW's bias-corrected update at step 1 applies
+        ~lr per weight regardless of gradient magnitude, which produces NaN in
+        DeBERTa on PyTorch 2.9+. Setting eps=1.0 makes backbone updates behave
+        like SGD (update ≈ lr * grad), which is numerically safe and standard
+        for fine-tuning pretrained transformers.
+        """
         if self.lr_backbone is not None and self.lr_head is not None:
             from torch.optim import AdamW
 
@@ -41,7 +49,7 @@ class PiiTrainer(Trainer):
             head_params = [p for n, p in self.model.named_parameters() if "deberta" not in n and p.requires_grad]
             self.optimizer = AdamW(
                 [
-                    {"params": backbone_params, "lr": self.lr_backbone},
+                    {"params": backbone_params, "lr": self.lr_backbone, "eps": 1.0},
                     {"params": head_params, "lr": self.lr_head},
                 ],
                 weight_decay=self.args.weight_decay,
