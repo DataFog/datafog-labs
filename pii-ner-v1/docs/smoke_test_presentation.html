@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PII-NER Smoke Test Walkthrough</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Helvetica Neue', Arial, sans-serif; background: #0f172a; color: #e2e8f0; overflow: hidden; }
+
+  .slide {
+    display: none;
+    width: 100vw;
+    height: 100vh;
+    padding: 60px 80px;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .slide.active { display: flex; }
+
+  h1 { font-size: 3em; font-weight: 700; margin-bottom: 16px; color: #f8fafc; }
+  h2 { font-size: 2.2em; font-weight: 600; margin-bottom: 32px; color: #f8fafc; }
+  h3 { font-size: 1.4em; font-weight: 600; margin-bottom: 16px; color: #94a3b8; }
+  p, li { font-size: 1.3em; line-height: 1.7; color: #cbd5e1; }
+  ul { list-style: none; padding-left: 0; }
+  ul li { margin-bottom: 12px; padding-left: 28px; position: relative; }
+  ul li::before { content: ""; position: absolute; left: 0; top: 12px; width: 10px; height: 10px; border-radius: 50%; background: #3b82f6; }
+
+  .subtitle { font-size: 1.5em; color: #94a3b8; margin-bottom: 40px; }
+  .highlight { color: #3b82f6; }
+  .green { color: #22c55e; }
+  .red { color: #ef4444; }
+  .yellow { color: #eab308; }
+  .dim { color: #64748b; }
+
+  .arch-box {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 24px 32px;
+    margin: 8px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .arch-box .label { font-size: 1.2em; font-weight: 600; }
+  .arch-box .detail { font-size: 1em; color: #94a3b8; }
+  .arch-arrow { text-align: center; font-size: 1.5em; color: #475569; margin: 4px 0; }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 20px 0;
+    font-size: 1.1em;
+  }
+  th {
+    background: #1e293b;
+    padding: 14px 20px;
+    text-align: left;
+    font-weight: 600;
+    color: #94a3b8;
+    border-bottom: 2px solid #334155;
+  }
+  td {
+    padding: 12px 20px;
+    border-bottom: 1px solid #1e293b;
+    color: #cbd5e1;
+  }
+  tr:hover td { background: #1e293b40; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+
+  .metric-card {
+    background: #1e293b;
+    border-radius: 12px;
+    padding: 24px;
+    text-align: center;
+    margin: 8px;
+  }
+  .metric-card .value { font-size: 2.8em; font-weight: 700; }
+  .metric-card .label { font-size: 0.95em; color: #94a3b8; margin-top: 4px; }
+  .metrics-row { display: flex; gap: 16px; margin: 20px 0; }
+
+  .code-block {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 20px 24px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 1.05em;
+    line-height: 1.6;
+    color: #e2e8f0;
+    margin: 16px 0;
+    white-space: pre;
+  }
+
+  .vs-box {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 20px;
+    align-items: center;
+    margin: 20px 0;
+  }
+  .vs-card {
+    background: #1e293b;
+    border-radius: 12px;
+    padding: 28px;
+    text-align: center;
+  }
+  .vs-label { font-size: 1.8em; font-weight: 700; color: #475569; }
+
+  /* Token visualization */
+  .token-row {
+    display: flex;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid #1e293b;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.95em;
+  }
+  .token-row.header {
+    font-weight: 700;
+    color: #94a3b8;
+    border-bottom: 2px solid #334155;
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    padding-bottom: 10px;
+    margin-bottom: 4px;
+  }
+  .token-col { width: 160px; padding: 4px 8px; }
+  .pred-col { width: 180px; padding: 4px 8px; }
+  .gold-col { width: 180px; padding: 4px 8px; }
+  .match-col { width: 40px; text-align: center; }
+  .token-entity { background: #1e3a5f; padding: 2px 8px; border-radius: 4px; color: #60a5fa; }
+  .token-o { color: #475569; }
+  .token-context { color: #64748b; font-style: italic; }
+  .match-yes { color: #22c55e; font-weight: 700; }
+
+  .example-box {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin: 12px 0;
+  }
+  .example-title {
+    font-size: 1.1em;
+    font-weight: 600;
+    color: #94a3b8;
+    margin-bottom: 12px;
+  }
+  .example-text {
+    font-size: 1.15em;
+    line-height: 1.8;
+    margin-bottom: 16px;
+  }
+  .hl-person { background: #7c3aed30; border-bottom: 2px solid #a78bfa; padding: 2px 4px; color: #c4b5fd; }
+  .hl-age { background: #05966930; border-bottom: 2px solid #34d399; padding: 2px 4px; color: #6ee7b7; }
+  .hl-gender { background: #d9770630; border-bottom: 2px solid #f59e0b; padding: 2px 4px; color: #fcd34d; }
+  .hl-password { background: #dc262630; border-bottom: 2px solid #f87171; padding: 2px 4px; color: #fca5a5; }
+  .hl-email { background: #0284c730; border-bottom: 2px solid #38bdf8; padding: 2px 4px; color: #7dd3fc; }
+  .hl-credit { background: #e11d4830; border-bottom: 2px solid #fb7185; padding: 2px 4px; color: #fda4af; }
+  .hl-location { background: #16a34a30; border-bottom: 2px solid #4ade80; padding: 2px 4px; color: #86efac; }
+  .hl-date { background: #9333ea30; border-bottom: 2px solid #c084fc; padding: 2px 4px; color: #d8b4fe; }
+
+  .legend-item {
+    display: inline-flex;
+    align-items: center;
+    margin: 4px 12px 4px 0;
+    font-size: 0.95em;
+  }
+  .legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    margin-right: 6px;
+  }
+
+  /* Navigation */
+  .nav {
+    position: fixed;
+    bottom: 30px;
+    right: 40px;
+    display: flex;
+    gap: 12px;
+    z-index: 100;
+  }
+  .nav button {
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #e2e8f0;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 1em;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .nav button:hover { background: #334155; }
+
+  .progress {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    height: 3px;
+    background: #3b82f6;
+    transition: width 0.3s;
+  }
+
+  .slide-num {
+    position: fixed;
+    bottom: 36px;
+    left: 40px;
+    color: #475569;
+    font-size: 0.95em;
+  }
+
+  .tag {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 0.85em;
+    font-weight: 600;
+    margin: 2px;
+  }
+  .tag-blue { background: #1e3a5f; color: #60a5fa; }
+  .tag-green { background: #14532d; color: #4ade80; }
+  .tag-red { background: #450a0a; color: #f87171; }
+  .tag-gray { background: #1e293b; color: #94a3b8; }
+</style>
+</head>
+<body>
+
+<!-- Slide 1: Title -->
+<div class="slide active" id="s1">
+  <div>
+    <h3>DataFog PII-NER v1</h3>
+    <h1>Smoke Test Walkthrough</h1>
+    <p class="subtitle">How we validated model wiring by overfitting on 100 examples</p>
+    <div style="margin-top: 48px; color: #475569; font-size: 1.1em;">
+      DeBERTa v3-xsmall + Char CNN + CRF &nbsp;&middot;&nbsp; 71M parameters &nbsp;&middot;&nbsp; 163 BIO tags
+    </div>
+  </div>
+</div>
+
+<!-- Slide 2: What is a Smoke Test -->
+<div class="slide" id="s2">
+  <div>
+    <h2>What is a Smoke Test?</h2>
+    <p style="font-size: 1.4em; margin-bottom: 40px;">
+      Before training on <span class="highlight">360K examples</span> for real, answer one question:<br>
+      <strong style="color: #f8fafc;">Is the model wired correctly?</strong>
+    </p>
+    <div class="two-col">
+      <div>
+        <h3>The Method</h3>
+        <ul>
+          <li>Take just <strong>100 examples</strong></li>
+          <li>Train for <strong>50 epochs</strong></li>
+          <li>Evaluate on <strong>the same 100 examples</strong></li>
+          <li>Can the model memorize them?</li>
+        </ul>
+      </div>
+      <div>
+        <h3>The Logic</h3>
+        <ul>
+          <li>If it <span class="red">can't</span> overfit 100 examples &rarr; something is broken</li>
+          <li>If it <span class="green">can</span> overfit &rarr; architecture works, move to real training</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 3: Architecture -->
+<div class="slide" id="s3">
+  <div>
+    <h2>The Architecture</h2>
+    <div style="max-width: 700px;">
+      <div class="arch-box">
+        <div>
+          <div class="label">DeBERTa v3-xsmall</div>
+          <div class="detail">Token-level language understanding</div>
+        </div>
+        <div style="text-align: right;">
+          <span class="tag tag-blue">Pretrained</span>
+          <div class="detail" style="margin-top: 4px;">70.7M params</div>
+        </div>
+      </div>
+      <div class="arch-arrow">&darr;</div>
+      <div class="arch-box">
+        <div>
+          <div class="label">Character CNN</div>
+          <div class="detail">3/4/5-gram filters for patterns like XXX-XX-XXXX</div>
+        </div>
+        <div style="text-align: right;">
+          <span class="tag tag-red">Random Init</span>
+        </div>
+      </div>
+      <div class="arch-arrow">&darr;</div>
+      <div class="arch-box">
+        <div>
+          <div class="label">CRF Head</div>
+          <div class="detail">Enforces valid BIO tag sequences</div>
+        </div>
+        <div style="text-align: right;">
+          <span class="tag tag-red">Random Init</span>
+          <div class="detail" style="margin-top: 4px;">438K params</div>
+        </div>
+      </div>
+      <div class="arch-arrow">&darr;</div>
+      <div class="arch-box" style="border-color: #3b82f6;">
+        <div>
+          <div class="label" style="color: #60a5fa;">163 BIO Tag Predictions</div>
+          <div class="detail">O, B-PERSON, I-PERSON, B-EMAIL, I-EMAIL, ...</div>
+        </div>
+      </div>
+    </div>
+    <p style="margin-top: 24px; font-size: 1.1em;">
+      Key asymmetry: DeBERTa already knows language. The CRF head knows <strong>nothing</strong>.
+    </p>
+  </div>
+</div>
+
+<!-- Slide 4: What is CRF -->
+<div class="slide" id="s4">
+  <div>
+    <h2>Why CRF?</h2>
+    <p style="margin-bottom: 32px;">A standard classifier predicts each token independently. A CRF predicts the <strong>entire sequence jointly</strong>.</p>
+    <div class="two-col">
+      <div>
+        <h3>Without CRF (Independent)</h3>
+        <div class="code-block">Token:  John    Smith   lives   in
+Pred:   B-PER   B-LOC   O       B-PER</div>
+        <p style="font-size: 1em; margin-top: 12px; color: #94a3b8;">Each token predicted in isolation. "Smith" mislabeled because the model doesn't see it follows "John".</p>
+      </div>
+      <div>
+        <h3>With CRF (Sequential)</h3>
+        <div class="code-block">Token:  John    Smith   lives   in
+Pred:   B-PER   I-PER   O       O</div>
+        <p style="font-size: 1em; margin-top: 12px; color: #94a3b8;">CRF learns: B-PERSON &rarr; I-PERSON is likely, B-PERSON &rarr; B-LOCATION is not.</p>
+      </div>
+    </div>
+    <div style="margin-top: 32px; padding: 20px; background: #1e293b; border-radius: 8px; border-left: 4px solid #eab308;">
+      <p style="font-size: 1.1em;"><span class="yellow">Important:</span> CRF loss (negative log-likelihood) is <strong>sequence-level</strong>, not per-token. Values of 1&ndash;50 are normal. This is not comparable to cross-entropy.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 5: Run 1 Setup -->
+<div class="slide" id="s5">
+  <div>
+    <h2>Run 1: Flat Learning Rate</h2>
+    <p class="subtitle">The same LR for everything. What could go wrong?</p>
+    <div class="two-col">
+      <div>
+        <h3>Configuration</h3>
+        <table>
+          <tr><td>Learning rate</td><td><strong>5e-4</strong> (same for all)</td></tr>
+          <tr><td>Warmup</td><td><strong>None</strong></td></tr>
+          <tr><td>Weight decay</td><td><strong>0.0</strong></td></tr>
+          <tr><td>Epochs</td><td>50</td></tr>
+          <tr><td>Batch size</td><td>4 (x4 accumulation = 16 effective)</td></tr>
+          <tr><td>GPU</td><td>T4</td></tr>
+        </table>
+      </div>
+      <div>
+        <h3>The Problem</h3>
+        <div class="code-block" style="font-size: 0.95em;">Pretrained DeBERTa ──[5e-4]──&gt; Too high!
+  Already good representations get destroyed
+
+Random CRF head ────[5e-4]──&gt; Too low!
+  Can't learn 163x163 transitions fast enough</div>
+        <p style="margin-top: 16px; font-size: 1em;">One LR can't serve two components with completely different needs.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 6: Run 1 Results -->
+<div class="slide" id="s6">
+  <div>
+    <h2>Run 1 Results: <span class="red">Total Failure</span></h2>
+    <div class="metrics-row">
+      <div class="metric-card" style="flex:1;">
+        <div class="value red">0.000</div>
+        <div class="label">F1 Score</div>
+      </div>
+      <div class="metric-card" style="flex:1;">
+        <div class="value red">0.000</div>
+        <div class="label">Precision</div>
+      </div>
+      <div class="metric-card" style="flex:1;">
+        <div class="value red">0.000</div>
+        <div class="label">Recall</div>
+      </div>
+      <div class="metric-card" style="flex:1;">
+        <div class="value" style="color: #f59e0b;">197.6</div>
+        <div class="label">Avg Training Loss</div>
+      </div>
+    </div>
+    <p style="font-size: 1.3em; margin: 24px 0;">50 epochs. Not a single entity predicted. Every token labeled <code style="background:#1e293b; padding: 2px 8px; border-radius: 4px;">O</code>.</p>
+    <table>
+      <tr><th>Epoch</th><th>Train Loss</th><th>Val Loss</th><th>F1</th><th>Status</th></tr>
+      <tr><td>1</td><td>&mdash;</td><td>273.7</td><td>0.000</td><td class="dim">All O</td></tr>
+      <tr><td>2</td><td style="color:#ef4444;">1241.9</td><td>78.5</td><td>0.000</td><td class="dim">Loss spike &mdash; backbone corrupted</td></tr>
+      <tr><td>10</td><td>172.4</td><td>45.6</td><td>0.000</td><td class="dim">All O</td></tr>
+      <tr><td>25</td><td>141.9</td><td>37.1</td><td>0.000</td><td class="dim">All O</td></tr>
+      <tr><td>50</td><td>197.6</td><td>&mdash;</td><td>0.000</td><td class="red">All O forever</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- Slide 7: Diagnosis -->
+<div class="slide" id="s7">
+  <div>
+    <h2>Diagnosis: The All-O Trap</h2>
+    <p style="font-size: 1.2em; margin-bottom: 32px;">In PII data, ~85-90% of tokens are <code style="background:#1e293b; padding: 2px 8px; border-radius: 4px;">O</code> (not an entity). Predicting all-O is a comfortable local minimum.</p>
+    <div class="two-col">
+      <div>
+        <h3>What the model learned</h3>
+        <div class="code-block" style="font-size: 1em;">Input:  "Contact John Smith at
+         john@acme.com for details"
+
+Pred:    O      O    O     O
+         O             O   O
+
+Gold:    O      B-PER I-PER O
+         B-EMAIL       O   O</div>
+        <p style="margin-top: 12px; font-size: 1em; color: #94a3b8;">Loss still decreases by getting O predictions more confident, without ever predicting entities.</p>
+      </div>
+      <div>
+        <h3>Why it's stuck</h3>
+        <ul>
+          <li>Backbone representations <span class="red">destroyed</span> by high LR in early epochs</li>
+          <li>CRF transition matrix stuck at uniform &mdash; no strong B &rarr; I preferences</li>
+          <li>All-O reduces loss without risk of wrong entity predictions</li>
+          <li>Without good backbone features, CRF has <strong>no signal</strong> to learn from</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 8: The Fix -->
+<div class="slide" id="s8">
+  <div>
+    <h2>The Fix: Differential Learning Rates</h2>
+    <p class="subtitle">Preserve what's good. Let new parts learn fast.</p>
+    <div class="vs-box">
+      <div class="vs-card">
+        <h3 style="color: #ef4444;">Run 1</h3>
+        <div style="font-size: 2em; font-weight: 700; margin: 16px 0;">5e-4</div>
+        <div class="dim">Same for everything</div>
+        <div style="margin-top: 16px;">
+          <span class="tag tag-red">No warmup</span>
+          <span class="tag tag-red">No weight decay</span>
+        </div>
+      </div>
+      <div class="vs-label">&rarr;</div>
+      <div class="vs-card" style="border: 1px solid #22c55e40;">
+        <h3 style="color: #22c55e;">Run 2</h3>
+        <div style="margin: 16px 0;">
+          <div style="font-size: 1.3em;">Backbone: <strong style="font-size: 1.4em;">2e-5</strong></div>
+          <div style="font-size: 1.3em; margin-top: 8px;">Head: <strong style="font-size: 1.4em;">1e-3</strong></div>
+        </div>
+        <div class="highlight" style="font-size: 1.1em; font-weight: 600;">50x differential</div>
+        <div style="margin-top: 16px;">
+          <span class="tag tag-green">10% warmup</span>
+          <span class="tag tag-green">0.01 weight decay</span>
+        </div>
+      </div>
+    </div>
+    <div class="code-block" style="font-size: 1.05em; max-width: 680px;">backbone_params = [p for n, p in model.named_parameters() if "deberta" in n]
+head_params     = [p for n, p in model.named_parameters() if "deberta" not in n]
+optimizer = AdamW([
+    {"params": backbone_params, "lr": 2e-5},
+    {"params": head_params,     "lr": 1e-3},
+])</div>
+  </div>
+</div>
+
+<!-- Slide 9: Run 2 Learning Curve -->
+<div class="slide" id="s9">
+  <div>
+    <h2>Run 2: The Learning Curve</h2>
+    <table style="font-size: 1em;">
+      <tr><th>Epoch</th><th>Train Loss</th><th>Val Loss</th><th>F1</th><th>What's Happening</th></tr>
+      <tr><td>1</td><td>&mdash;</td><td>340.1</td><td class="dim">0.000</td><td class="dim">CRF learning O-tag transitions</td></tr>
+      <tr><td>5</td><td>474</td><td>74.5</td><td class="dim">0.000</td><td class="dim">Still all-O but loss dropping fast</td></tr>
+      <tr><td>10</td><td>142</td><td>36.1</td><td class="dim">0.000</td><td class="dim">Last all-zero epoch</td></tr>
+      <tr style="background: #22c55e10;"><td><strong>11</strong></td><td>142</td><td>32.0</td><td class="green"><strong>0.077</strong></td><td class="green">First entities predicted!</td></tr>
+      <tr><td>15</td><td>84</td><td>16.9</td><td>0.324</td><td>Person, Email, Location emerging</td></tr>
+      <tr><td>20</td><td>43</td><td>8.1</td><td>0.527</td><td>Most common types working</td></tr>
+      <tr><td>29</td><td>13</td><td>1.8</td><td>0.909</td><td>Passes F1 > 0.90 threshold</td></tr>
+      <tr><td>36</td><td>5.6</td><td>0.76</td><td>0.962</td><td>IBAN finally appears (0.667 F1)</td></tr>
+      <tr><td>41</td><td>3.4</td><td>0.53</td><td>0.985</td><td>Recall hits 1.000</td></tr>
+      <tr style="background: #22c55e10;"><td><strong>50</strong></td><td><strong>2.3</strong></td><td><strong>0.29</strong></td><td class="green"><strong>0.992</strong></td><td class="green">Near-perfect overfit</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- Slide 10: The Inflection Point -->
+<div class="slide" id="s10">
+  <div>
+    <h2>The Inflection Point: Epoch 11</h2>
+    <p style="font-size: 1.2em; margin-bottom: 32px;">For 10 epochs, metrics were identical to Run 1: <strong>all zero</strong>. But the loss told a different story.</p>
+    <div class="two-col">
+      <div>
+        <h3>What was happening internally</h3>
+        <ul>
+          <li>CRF transition matrix gradually learning that <code style="background:#1e293b; padding: 2px 6px; border-radius: 4px;">B-PER &rarr; I-PER</code> is valid</li>
+          <li>Backbone features being gently tuned for PII context</li>
+          <li>Emission scores for entity tags slowly increasing</li>
+          <li>At epoch 11, scores finally <strong>cross the threshold</strong> to beat the all-O path</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Why metrics are binary</h3>
+        <p style="font-size: 1.05em;">Seqeval requires <strong>exact entity boundary matches</strong>.</p>
+        <div class="code-block" style="font-size: 0.95em;">Gold: [B-PER] [I-PER] [I-PER]
+Pred: [B-PER] [I-PER]
+Score: 0.0   &larr; close but no credit</div>
+        <p style="margin-top: 12px; font-size: 1.05em;">Metrics jump from 0 to non-zero when the CRF finally gets entire entity spans right.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 11: Per-Type Emergence -->
+<div class="slide" id="s11">
+  <div>
+    <h2>Entity Types Emerge by Distinctiveness</h2>
+    <p style="margin-bottom: 24px;">Types with clear patterns and high frequency appeared first.</p>
+    <div class="two-col">
+      <div>
+        <table>
+          <tr><th>Type</th><th>First Seen</th><th>Final F1</th></tr>
+          <tr><td>Person</td><td>Epoch 11</td><td class="green">1.000</td></tr>
+          <tr><td>Email</td><td>Epoch 13</td><td class="green">1.000</td></tr>
+          <tr><td>Credit Card</td><td>Epoch 14</td><td class="green">1.000</td></tr>
+          <tr><td>Date</td><td>Epoch 15</td><td class="green">1.000</td></tr>
+          <tr><td>Location</td><td>Epoch 11</td><td class="green">1.000</td></tr>
+          <tr><td>Phone</td><td>Epoch 20</td><td class="green">1.000</td></tr>
+          <tr><td>SSN</td><td>Epoch 26</td><td class="green">1.000</td></tr>
+        </table>
+      </div>
+      <div>
+        <table>
+          <tr><th>Type</th><th>First Seen</th><th>Final F1</th></tr>
+          <tr><td>Street Address</td><td>Epoch 17</td><td class="green">1.000</td></tr>
+          <tr><td>Organization</td><td>Epoch 18</td><td class="green">1.000</td></tr>
+          <tr><td>Age</td><td>Epoch 18</td><td class="green">1.000</td></tr>
+          <tr><td>Password</td><td>Epoch 25</td><td class="green">1.000</td></tr>
+          <tr><td>Gender</td><td>Epoch 20</td><td class="green">1.000</td></tr>
+          <tr><td>Username</td><td>Epoch 17</td><td class="green">1.000</td></tr>
+          <tr><td>IBAN</td><td>Epoch 36</td><td class="yellow">0.667</td></tr>
+        </table>
+      </div>
+    </div>
+    <p style="margin-top: 20px; font-size: 1.05em;">
+      <span class="dim">IBAN: rare in the 100-example sample, so the CRF only partially learned its pattern. With full 360K training this will resolve.</span>
+    </p>
+  </div>
+</div>
+
+<!-- Slide 12: Final Results -->
+<div class="slide" id="s12">
+  <div>
+    <h2>Final Results: <span class="green">PASSED</span></h2>
+    <div class="metrics-row">
+      <div class="metric-card" style="flex:1;">
+        <div class="value green">0.992</div>
+        <div class="label">F1 Score</div>
+      </div>
+      <div class="metric-card" style="flex:1;">
+        <div class="value green">0.985</div>
+        <div class="label">Precision</div>
+      </div>
+      <div class="metric-card" style="flex:1;">
+        <div class="value green">1.000</div>
+        <div class="label">Recall</div>
+      </div>
+      <div class="metric-card" style="flex:1;">
+        <div class="value green">0.288</div>
+        <div class="label">Eval Loss</div>
+      </div>
+    </div>
+    <div class="metrics-row">
+      <div class="metric-card" style="flex:1;">
+        <div class="value green">1.000</div>
+        <div class="label">Tier 1 Recall</div>
+      </div>
+      <div class="metric-card" style="flex:1;">
+        <div class="value green">1.000</div>
+        <div class="label">Tier 2 Recall</div>
+      </div>
+      <div class="metric-card" style="flex:1;">
+        <div class="value green">1.000</div>
+        <div class="label">Tier 3 Recall</div>
+      </div>
+      <div class="metric-card" style="flex:1;">
+        <div class="value green">1.000</div>
+        <div class="label">Tier 4 Recall</div>
+      </div>
+    </div>
+    <div style="margin-top: 24px; display: flex; gap: 24px;">
+      <div style="padding: 16px 24px; background: #14532d40; border: 1px solid #22c55e40; border-radius: 8px; flex:1;">
+        <span class="green" style="font-weight: 600;">Eval Loss &lt; 10:</span> PASS (0.288)
+      </div>
+      <div style="padding: 16px 24px; background: #14532d40; border: 1px solid #22c55e40; border-radius: 8px; flex:1;">
+        <span class="green" style="font-weight: 600;">F1 &gt; 0.90:</span> PASS (0.992)
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 13: Interpreting the Metrics -->
+<div class="slide" id="s13">
+  <div>
+    <h2>How to Read These Metrics</h2>
+    <div class="two-col">
+      <div>
+        <h3>Overall Metrics</h3>
+        <div class="example-box">
+          <div style="margin-bottom: 12px;">
+            <strong style="color: #60a5fa;">F1 = 0.992</strong> &mdash; Harmonic mean of precision and recall. The single best number for "how good is this model?"
+          </div>
+          <div style="margin-bottom: 12px;">
+            <strong style="color: #60a5fa;">Precision = 0.985</strong> &mdash; Of all entities the model predicted, 98.5% were correct. (Low FP)
+          </div>
+          <div style="margin-bottom: 12px;">
+            <strong style="color: #60a5fa;">Recall = 1.000</strong> &mdash; Of all real entities in the data, 100% were found. (Zero FN)
+          </div>
+          <div>
+            <strong style="color: #60a5fa;">Eval Loss = 0.288</strong> &mdash; CRF sequence-level NLL. The model assigns ~75% probability to the exact correct tag sequence.
+          </div>
+        </div>
+      </div>
+      <div>
+        <h3>Tier Recall (PII Severity)</h3>
+        <div class="example-box">
+          <div style="margin-bottom: 12px;">
+            <strong style="color: #ef4444;">Tier 1 = 1.000</strong> &mdash; Direct identifiers (SSN, passport, credit card). Miss = immediate breach.
+          </div>
+          <div style="margin-bottom: 12px;">
+            <strong style="color: #f59e0b;">Tier 2 = 1.000</strong> &mdash; Strong identifiers (email, phone, DOB). Can identify individuals.
+          </div>
+          <div style="margin-bottom: 12px;">
+            <strong style="color: #3b82f6;">Tier 3 = 1.000</strong> &mdash; Contextual PII (name, location, organization). Identifying in combination.
+          </div>
+          <div>
+            <strong style="color: #94a3b8;">Tier 4 = 1.000</strong> &mdash; Sensitive attributes (gender, religion, political). Protected categories.
+          </div>
+        </div>
+        <p style="font-size: 0.95em; margin-top: 12px; color: #94a3b8;">In production, Tier 1 recall is the most critical &mdash; missing a credit card number is worse than missing a first name.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 14: Reading BIO Tags -->
+<div class="slide" id="s14">
+  <div>
+    <h2>How BIO Tagging Works</h2>
+    <p style="margin-bottom: 24px;">Every token gets one of 163 labels: <code style="background:#1e293b; padding: 2px 8px; border-radius: 4px;">O</code> (outside), <code style="background:#1e293b; padding: 2px 8px; border-radius: 4px;">B-TYPE</code> (begin entity), or <code style="background:#1e293b; padding: 2px 8px; border-radius: 4px;">I-TYPE</code> (inside entity).</p>
+    <div class="example-box">
+      <div class="example-title">Example: "Contact Kattie at john@acme.com"</div>
+      <table style="margin: 0; font-size: 1em;">
+        <tr><th>Token</th><th>Tag</th><th>Meaning</th></tr>
+        <tr><td>Contact</td><td class="dim">O</td><td class="dim">Not an entity</td></tr>
+        <tr><td>Kat</td><td style="color: #c4b5fd;">B-PERSON</td><td>Start of a person name</td></tr>
+        <tr><td>##tie</td><td style="color: #c4b5fd;">I-PERSON</td><td>Continuation of that name ("Kattie")</td></tr>
+        <tr><td>at</td><td class="dim">O</td><td class="dim">Not an entity</td></tr>
+        <tr><td>john</td><td style="color: #7dd3fc;">B-EMAIL</td><td>Start of an email address</td></tr>
+        <tr><td>@acme</td><td style="color: #7dd3fc;">I-EMAIL</td><td>Continuation of email</td></tr>
+        <tr><td>.com</td><td style="color: #7dd3fc;">I-EMAIL</td><td>Continuation of email</td></tr>
+      </table>
+    </div>
+    <div style="margin-top: 24px; padding: 20px; background: #1e293b; border-radius: 8px; border-left: 4px solid #3b82f6;">
+      <p style="font-size: 1.1em;"><span class="highlight">Key:</span> The <strong>B-</strong> prefix marks where an entity <em>starts</em>. The <strong>I-</strong> prefix marks every subsequent token of that same entity. The CRF ensures <code>I-EMAIL</code> can only follow <code>B-EMAIL</code> or another <code>I-EMAIL</code> &mdash; never appear out of nowhere.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 15: Sample Prediction - Person + Age + Gender -->
+<div class="slide" id="s15">
+  <div>
+    <h2>Sample Predictions: Multi-Entity Sentence</h2>
+    <p style="margin-bottom: 16px;">The model correctly identifies three different PII types in a single sentence.</p>
+    <div class="example-box">
+      <div class="example-title">Example 3 from evaluation set</div>
+      <div class="example-text">
+        "... <span class="hl-person">Kattie</span> ... <span class="hl-age">72</span> ... <span class="hl-gender">Intersex person</span> ..."
+      </div>
+      <div style="margin-bottom: 8px;">
+        <span class="legend-item"><span class="legend-dot" style="background: #a78bfa;"></span> Person</span>
+        <span class="legend-item"><span class="legend-dot" style="background: #34d399;"></span> Age</span>
+        <span class="legend-item"><span class="legend-dot" style="background: #f59e0b;"></span> Gender</span>
+      </div>
+      <table style="margin: 0; font-size: 0.95em; width: auto;">
+        <tr><th style="width:140px;">Token</th><th style="width:170px;">Predicted</th><th style="width:170px;">Ground Truth</th><th style="width:50px;">Match</th></tr>
+        <tr><td><code>Kat</code></td><td style="color: #c4b5fd;">B-PERSON</td><td style="color: #c4b5fd;">B-PERSON</td><td class="match-yes">Y</td></tr>
+        <tr><td><code>##tie</code></td><td style="color: #c4b5fd;">I-PERSON</td><td style="color: #c4b5fd;">I-PERSON</td><td class="match-yes">Y</td></tr>
+        <tr><td><code>72</code></td><td style="color: #6ee7b7;">B-AGE</td><td style="color: #6ee7b7;">B-AGE</td><td class="match-yes">Y</td></tr>
+        <tr><td><code>Inter</code></td><td style="color: #fcd34d;">B-GENDER</td><td style="color: #fcd34d;">B-GENDER</td><td class="match-yes">Y</td></tr>
+        <tr><td><code>##se</code></td><td style="color: #fcd34d;">I-GENDER</td><td style="color: #fcd34d;">I-GENDER</td><td class="match-yes">Y</td></tr>
+        <tr><td><code>##x</code></td><td style="color: #fcd34d;">I-GENDER</td><td style="color: #fcd34d;">I-GENDER</td><td class="match-yes">Y</td></tr>
+        <tr><td><code>person</code></td><td style="color: #fcd34d;">I-GENDER</td><td style="color: #fcd34d;">I-GENDER</td><td class="match-yes">Y</td></tr>
+      </table>
+    </div>
+    <p style="margin-top: 16px; font-size: 1.05em;">
+      Note how DeBERTa splits "Kattie" &rarr; <code>Kat</code> + <code>##tie</code> and "Intersex" &rarr; <code>Inter</code> + <code>##se</code> + <code>##x</code>. The CRF correctly chains <code>B-</code> &rarr; <code>I-</code> across all sub-tokens.
+    </p>
+  </div>
+</div>
+
+<!-- Slide 16: Sample Prediction - Password -->
+<div class="slide" id="s16">
+  <div>
+    <h2>Sample Predictions: Complex Span</h2>
+    <p style="margin-bottom: 16px;">A password is split across many sub-tokens. The CRF must maintain the entity across all of them.</p>
+    <div class="example-box">
+      <div class="example-title">Example 5 from evaluation set</div>
+      <div class="example-text">
+        "... <span class="hl-age">88</span> ... <span class="hl-password">Y##2r##W##li##O##h##f##8##I##r</span> ..."
+      </div>
+      <div style="margin-bottom: 8px;">
+        <span class="legend-item"><span class="legend-dot" style="background: #34d399;"></span> Age</span>
+        <span class="legend-item"><span class="legend-dot" style="background: #f87171;"></span> Password (32 tokens!)</span>
+      </div>
+      <table style="margin: 0; font-size: 0.95em; width: auto;">
+        <tr><th style="width:140px;">Token</th><th style="width:170px;">Predicted</th><th style="width:170px;">Ground Truth</th><th style="width:50px;">Match</th></tr>
+        <tr><td><code>88</code></td><td style="color: #6ee7b7;">B-AGE</td><td style="color: #6ee7b7;">B-AGE</td><td class="match-yes">Y</td></tr>
+        <tr><td><code>Y</code></td><td style="color: #fca5a5;">B-PASSWORD</td><td style="color: #fca5a5;">B-PASSWORD</td><td class="match-yes">Y</td></tr>
+        <tr><td><code>##2</code></td><td style="color: #fca5a5;">I-PASSWORD</td><td style="color: #fca5a5;">I-PASSWORD</td><td class="match-yes">Y</td></tr>
+        <tr><td><code>##r</code></td><td style="color: #fca5a5;">I-PASSWORD</td><td style="color: #fca5a5;">I-PASSWORD</td><td class="match-yes">Y</td></tr>
+        <tr><td><code>##W</code></td><td style="color: #fca5a5;">I-PASSWORD</td><td style="color: #fca5a5;">I-PASSWORD</td><td class="match-yes">Y</td></tr>
+        <tr><td colspan="4" class="dim" style="text-align: center;">... 26 more I-PASSWORD tokens, all correct ...</td></tr>
+        <tr><td><code>##r</code></td><td style="color: #fca5a5;">I-PASSWORD</td><td style="color: #fca5a5;">I-PASSWORD</td><td class="match-yes">Y</td></tr>
+      </table>
+    </div>
+    <p style="margin-top: 16px; font-size: 1.05em;">
+      This is where the CRF shines: maintaining a <strong>32-token entity span</strong> without breaking. An independent classifier would likely drop the chain at some point.
+    </p>
+  </div>
+</div>
+
+<!-- Slide 17: No-Entity Examples -->
+<div class="slide" id="s17">
+  <div>
+    <h2>Sample Predictions: No Entities</h2>
+    <p style="margin-bottom: 24px;">Equally important: the model correctly predicts <strong>nothing</strong> when there are no entities.</p>
+    <div class="two-col">
+      <div>
+        <div class="example-box">
+          <div class="example-title">Example 1</div>
+          <div class="example-text" style="color: #94a3b8;">
+            (All tokens in this example are non-PII)
+          </div>
+          <div style="padding: 16px; text-align: center;">
+            <span style="font-size: 1.3em; color: #22c55e; font-weight: 600;">0 predictions made</span>
+            <div style="color: #94a3b8; margin-top: 8px;">No false positives</div>
+          </div>
+        </div>
+        <div class="example-box" style="margin-top: 16px;">
+          <div class="example-title">Example 4</div>
+          <div class="example-text" style="color: #94a3b8;">
+            (All tokens in this example are non-PII)
+          </div>
+          <div style="padding: 16px; text-align: center;">
+            <span style="font-size: 1.3em; color: #22c55e; font-weight: 600;">0 predictions made</span>
+            <div style="color: #94a3b8; margin-top: 8px;">No false positives</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <h3>Why this matters</h3>
+        <ul>
+          <li><strong>Precision = 0.985</strong> means only 1.5% of predictions are false positives</li>
+          <li>In production, false positives cause unnecessary redaction of normal text</li>
+          <li>The model isn't just pattern-matching &mdash; it understands <em>context</em></li>
+          <li>Example 2 has "Omer" as a person, but the model doesn't hallucinate entities in Examples 1 and 4 where there are none</li>
+        </ul>
+        <div style="margin-top: 24px; padding: 16px; background: #1e293b; border-radius: 8px; border-left: 4px solid #22c55e;">
+          <p style="font-size: 1.05em;"><span class="green">Recall 1.000 + Precision 0.985</span> means: find everything, with almost no false alarms.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 18: Single-Token Entity -->
+<div class="slide" id="s18">
+  <div>
+    <h2>Sample Predictions: Single-Token Entity</h2>
+    <p style="margin-bottom: 24px;">Not all entities are multi-token. The model handles single-token names correctly.</p>
+    <div class="example-box" style="max-width: 700px;">
+      <div class="example-title">Example 2</div>
+      <div class="example-text">
+        "... <span class="hl-person">Omer</span> ..."
+      </div>
+      <table style="margin: 0; font-size: 1.05em; width: auto;">
+        <tr><th style="width:140px;">Token</th><th style="width:170px;">Predicted</th><th style="width:170px;">Ground Truth</th><th style="width:50px;">Match</th></tr>
+        <tr><td><code>Omer</code></td><td style="color: #c4b5fd;">B-PERSON</td><td style="color: #c4b5fd;">B-PERSON</td><td class="match-yes">Y</td></tr>
+      </table>
+    </div>
+    <div style="margin-top: 32px; max-width: 700px;">
+      <h3>What this tells us</h3>
+      <ul>
+        <li>Single-word name &mdash; only needs <code>B-PERSON</code>, no <code>I-PERSON</code></li>
+        <li>"Omer" isn't split into sub-tokens by DeBERTa &mdash; it's in the vocabulary</li>
+        <li>The CRF correctly emits just one B-tag without spurious continuation</li>
+        <li>All surrounding tokens correctly labeled <code>O</code> &mdash; clean boundaries</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 19: Side by Side -->
+<div class="slide" id="s19">
+  <div>
+    <h2>Run 1 vs Run 2: Full Comparison</h2>
+    <table style="font-size: 1.15em;">
+      <tr><th></th><th style="color: #ef4444;">Run 1 (Flat LR)</th><th style="color: #22c55e;">Run 2 (Differential LR)</th></tr>
+      <tr><td>Backbone LR</td><td>5e-4</td><td>2e-5</td></tr>
+      <tr><td>Head LR</td><td>5e-4</td><td>1e-3</td></tr>
+      <tr><td>LR Ratio</td><td>1x</td><td>50x</td></tr>
+      <tr><td>Warmup</td><td>None</td><td>10%</td></tr>
+      <tr><td>Weight Decay</td><td>0.0</td><td>0.01</td></tr>
+      <tr><td>First Entity</td><td class="red">Never</td><td>Epoch 11</td></tr>
+      <tr><td>Final F1</td><td class="red">0.000</td><td class="green">0.992</td></tr>
+      <tr><td>Final Eval Loss</td><td class="red">&mdash;</td><td class="green">0.288</td></tr>
+      <tr><td>Recall</td><td class="red">0.000</td><td class="green">1.000</td></tr>
+      <tr><td>Verdict</td><td class="red">FAIL</td><td class="green">PASS</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- Slide 20: Takeaway -->
+<div class="slide" id="s20">
+  <div>
+    <h2>The Takeaway</h2>
+    <div style="max-width: 800px;">
+      <p style="font-size: 1.6em; line-height: 1.6; margin-bottom: 40px;">
+        When combining <span class="highlight">pretrained</span> and <span class="red">randomly initialized</span> components,
+        differential learning rates aren't optional &mdash; they're essential.
+      </p>
+      <div class="arch-box" style="margin-bottom: 16px;">
+        <div>
+          <div class="label">Pretrained components</div>
+          <div class="detail">Need preservation &rarr; low LR</div>
+        </div>
+        <div><span class="tag tag-blue">2e-5</span></div>
+      </div>
+      <div class="arch-box">
+        <div>
+          <div class="label">New components</div>
+          <div class="detail">Need speed &rarr; high LR</div>
+        </div>
+        <div><span class="tag tag-green">1e-3</span></div>
+      </div>
+      <p style="margin-top: 40px; font-size: 1.2em;">
+        <strong>Next:</strong> Full training on 360K examples &rarr; Benchmark vs GLiNER2 and Presidio &rarr; ONNX export
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- Navigation -->
+<div class="nav">
+  <button onclick="prev()">&larr; Prev</button>
+  <button onclick="next()">Next &rarr;</button>
+</div>
+<div class="progress" id="progress"></div>
+<div class="slide-num" id="slideNum"></div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  let current = 0;
+
+  function show(n) {
+    slides[current].classList.remove('active');
+    current = Math.max(0, Math.min(n, slides.length - 1));
+    slides[current].classList.add('active');
+    document.getElementById('progress').style.width = ((current + 1) / slides.length * 100) + '%';
+    document.getElementById('slideNum').textContent = (current + 1) + ' / ' + slides.length;
+  }
+
+  function next() { show(current + 1); }
+  function prev() { show(current - 1); }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); next(); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); prev(); }
+  });
+
+  show(0);
+</script>
+</body>
+</html>
