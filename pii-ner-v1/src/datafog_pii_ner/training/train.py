@@ -35,18 +35,35 @@ class PiiTrainer(Trainer):
     def create_optimizer(self):
         """Create AdamW with differential learning rates for backbone vs head.
 
-        The backbone group uses eps=1.0 to dampen AdamW's adaptive per-parameter
-        scaling. Without this, AdamW's bias-corrected update at step 1 applies
-        ~lr per weight regardless of gradient magnitude, which produces NaN in
-        DeBERTa on PyTorch 2.9+. Setting eps=1.0 makes backbone updates behave
-        like SGD (update ≈ lr * grad), which is numerically safe and standard
-        for fine-tuning pretrained transformers.
+        Key details:
+        - model.float() ensures FP32 master weights. from_pretrained() may load
+          in the saved dtype (FP16 safetensors), but FP16 mixed precision requires
+          FP32 parameters so the gradient scaler can unscale FP32 gradients.
+        - Backbone eps=1.0 dampens AdamW's adaptive per-parameter scaling.
+          Without this, bias-corrected updates at step 1 apply ~lr per weight
+          regardless of gradient magnitude, producing NaN in DeBERTa on PyTorch 2.9+.
         """
         if self.lr_backbone is not None and self.lr_head is not None:
+            import torch
             from torch.optim import AdamW
+
+            # Ensure FP32 master weights — required for FP16 gradient scaler.
+            # from_pretrained() may load in FP16 if safetensors are stored that way.
+            self.model.float()
 
             backbone_params = [p for n, p in self.model.named_parameters() if "deberta" in n and p.requires_grad]
             head_params = [p for n, p in self.model.named_parameters() if "deberta" not in n and p.requires_grad]
+
+            logger.info(
+                f"Optimizer: backbone={len(backbone_params)} tensors (lr={self.lr_backbone}, eps=1.0), "
+                f"head={len(head_params)} tensors (lr={self.lr_head})"
+            )
+
+            # Verify all params are FP32
+            non_fp32 = [(n, p.dtype) for n, p in self.model.named_parameters() if p.dtype != torch.float32]
+            if non_fp32:
+                logger.warning(f"Non-FP32 params after .float(): {non_fp32[:5]}")
+
             self.optimizer = AdamW(
                 [
                     {"params": backbone_params, "lr": self.lr_backbone, "eps": 1.0},
