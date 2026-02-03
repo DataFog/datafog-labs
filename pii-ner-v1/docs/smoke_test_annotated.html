@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smoke Test Notebook — Annotated Deep Dive</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Helvetica Neue', Arial, sans-serif; background: #0f172a; color: #e2e8f0; overflow: hidden; }
+
+  .slide {
+    display: none;
+    width: 100vw;
+    height: 100vh;
+    padding: 48px 72px;
+    flex-direction: column;
+    justify-content: center;
+    overflow-y: auto;
+  }
+  .slide.active { display: flex; }
+
+  h1 { font-size: 2.8em; font-weight: 700; margin-bottom: 12px; color: #f8fafc; }
+  h2 { font-size: 2em; font-weight: 600; margin-bottom: 24px; color: #f8fafc; }
+  h3 { font-size: 1.3em; font-weight: 600; margin-bottom: 12px; color: #94a3b8; }
+  p, li { font-size: 1.15em; line-height: 1.7; color: #cbd5e1; }
+  ul { list-style: none; padding-left: 0; }
+  ul li { margin-bottom: 10px; padding-left: 24px; position: relative; }
+  ul li::before { content: ""; position: absolute; left: 0; top: 12px; width: 8px; height: 8px; border-radius: 50%; background: #3b82f6; }
+
+  .subtitle { font-size: 1.4em; color: #94a3b8; margin-bottom: 32px; }
+  .highlight { color: #3b82f6; }
+  .green { color: #22c55e; }
+  .red { color: #ef4444; }
+  .yellow { color: #eab308; }
+  .dim { color: #64748b; }
+  .orange { color: #f97316; }
+  .purple { color: #a78bfa; }
+
+  .code-block {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin: 12px 0;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.88em;
+    line-height: 1.6;
+    overflow-x: auto;
+    white-space: pre;
+    color: #e2e8f0;
+  }
+
+  .annotation {
+    background: #172554;
+    border-left: 3px solid #3b82f6;
+    border-radius: 0 8px 8px 0;
+    padding: 14px 20px;
+    margin: 10px 0;
+    font-size: 1em;
+    line-height: 1.6;
+  }
+  .annotation.warn {
+    background: #422006;
+    border-left-color: #f97316;
+  }
+  .annotation.green-note {
+    background: #052e16;
+    border-left-color: #22c55e;
+  }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin: 12px 0;
+  }
+  .col {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 20px 24px;
+  }
+  .col h3 { margin-bottom: 10px; }
+
+  .arch-box {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 18px 24px;
+    margin: 6px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .arch-box .label { font-size: 1.1em; font-weight: 600; }
+  .arch-box .detail { font-size: 0.9em; color: #94a3b8; }
+  .arch-arrow { text-align: center; font-size: 1.3em; color: #475569; margin: 2px 0; }
+
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 0.95em; }
+  th { background: #1e293b; padding: 10px 14px; text-align: left; border-bottom: 2px solid #334155; color: #94a3b8; font-weight: 600; }
+  td { padding: 10px 14px; border-bottom: 1px solid #1e293b; }
+  tr:hover { background: #1e293b40; }
+
+  .nav {
+    position: fixed;
+    bottom: 24px;
+    right: 32px;
+    font-size: 0.85em;
+    color: #475569;
+    z-index: 100;
+  }
+
+  .cell-label {
+    display: inline-block;
+    background: #3b82f620;
+    border: 1px solid #3b82f640;
+    border-radius: 6px;
+    padding: 2px 10px;
+    font-size: 0.8em;
+    color: #60a5fa;
+    margin-bottom: 10px;
+    font-family: 'SF Mono', monospace;
+  }
+
+  .param-row {
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid #1e293b;
+    font-size: 0.95em;
+  }
+  .param-name {
+    font-family: 'SF Mono', monospace;
+    color: #60a5fa;
+    font-weight: 500;
+  }
+  .param-desc { color: #cbd5e1; }
+
+  .flow-step {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 14px 20px;
+    margin: 4px 0;
+  }
+  .flow-arrow { text-align: center; color: #475569; font-size: 1.2em; margin: 2px 0; }
+
+  .tensor-shape {
+    font-family: 'SF Mono', monospace;
+    color: #a78bfa;
+    font-size: 0.9em;
+  }
+</style>
+</head>
+<body>
+
+<!-- Slide 1: Title -->
+<div class="slide active" id="slide-1">
+  <h1>Smoke Test Notebook</h1>
+  <p class="subtitle">An annotated walkthrough of every cell, every parameter,<br>and every design decision.</p>
+  <div style="margin-top: 32px;">
+    <p style="color: #64748b; font-size: 1em;">File: <code>pii-ner-v1/notebooks/smoke_test.ipynb</code></p>
+    <p style="color: #64748b; font-size: 1em; margin-top: 6px;">14 cells &middot; ~120 lines of code &middot; 6 sections</p>
+  </div>
+  <div style="margin-top: 40px;">
+    <p style="color: #475569; font-size: 0.9em;">Use arrow keys to navigate &middot; 28 slides</p>
+  </div>
+</div>
+
+<!-- Slide 2: Notebook Map -->
+<div class="slide" id="slide-2">
+  <h2>Notebook Map</h2>
+  <p style="margin-bottom: 20px; color: #94a3b8;">Each section maps to a phase of the smoke test pipeline:</p>
+  <table>
+    <tr><th>Section</th><th>Cells</th><th>What It Does</th><th>Slides</th></tr>
+    <tr><td><span class="highlight">1. Setup</span></td><td>0 &ndash; 3</td><td>Clone repo, install deps, check GPU</td><td>3 &ndash; 5</td></tr>
+    <tr><td><span class="highlight">2. Load Model</span></td><td>4 &ndash; 5</td><td>Configure and build the full model</td><td>6 &ndash; 16</td></tr>
+    <tr><td><span class="highlight">3. Load Data</span></td><td>6 &ndash; 7</td><td>Fetch 100 examples, tokenize, build char_ids</td><td>17 &ndash; 19</td></tr>
+    <tr><td><span class="highlight">4. Train</span></td><td>8 &ndash; 9</td><td>Differential LRs, optimizer, 50 epochs</td><td>20 &ndash; 23</td></tr>
+    <tr><td><span class="highlight">5. Evaluate</span></td><td>10 &ndash; 11</td><td>Compute metrics, PASS/FAIL check</td><td>24 &ndash; 25</td></tr>
+    <tr><td><span class="highlight">6. Predictions</span></td><td>12 &ndash; 13</td><td>Visualize token-level predictions</td><td>26 &ndash; 27</td></tr>
+  </table>
+  <div class="annotation" style="margin-top: 20px;">
+    The heaviest section is <strong>Load Model</strong> (11 slides) because that's where the architecture is assembled. We'll go through every component and every parameter.
+  </div>
+</div>
+
+<!-- Slide 3: Cell 0 — Header -->
+<div class="slide" id="slide-3">
+  <span class="cell-label">Cell 0 &mdash; Markdown</span>
+  <h2>Success Criteria</h2>
+  <div class="code-block" style="font-size: 0.85em; white-space: pre-wrap;">Success criteria:
+- Eval loss &lt; 10
+- F1 on training data &gt; 0.90
+- Runs in under 10 minutes on a T4 GPU</div>
+  <div class="annotation" style="margin-top: 16px;">
+    <strong>Why these numbers?</strong><br>
+    &bull; <code>Eval loss &lt; 10</code> &mdash; CRF loss is a negative log-likelihood over the <em>entire sequence</em>, not per-token cross-entropy. A loss of 0.8 means ~45% probability on the correct tag sequence out of 163<sup>seq_len</sup> paths. Values under 10 mean the model is confidently predicting the right sequences.<br><br>
+    &bull; <code>F1 &gt; 0.90</code> &mdash; Since we're evaluating on the <em>same</em> 100 training examples, this is an overfit test. If the model can't memorize 100 examples, the wiring is broken. 0.90 (not 1.0) accounts for rare entity types that may only appear once in 100 examples.<br><br>
+    &bull; <code>Under 10 minutes</code> &mdash; Practical constraint. A T4 has 16GB VRAM. If the model can't train in 10 min on 100 examples, something is wrong with batch sizes or memory.
+  </div>
+</div>
+
+<!-- Slide 4: Cell 2 — Setup -->
+<div class="slide" id="slide-4">
+  <span class="cell-label">Cell 2 &mdash; Code</span>
+  <h2>Setup: Install &amp; Import</h2>
+  <div class="code-block">import os, sys
+
+if not os.path.exists("/content/datafog-labs"):
+    !git clone https://github.com/DataFog/datafog-labs.git /content/datafog-labs
+else:
+    !cd /content/datafog-labs && git pull
+
+!pip install -e "/content/datafog-labs/pii-ner-v1[dev]" -q
+
+sys.path.insert(0, "/content/datafog-labs/pii-ner-v1/src")
+
+import datafog_pii_ner</div>
+  <div class="annotation">
+    <strong>Why <code>sys.path.insert</code>?</strong> When you <code>pip install -e</code> a package in Colab, Python's import cache sometimes doesn't pick it up until you restart the runtime. Inserting the src directory at position 0 in <code>sys.path</code> guarantees the module is importable without a restart. This is a Colab-specific workaround.
+  </div>
+  <div class="annotation warn">
+    <strong>Why <code>[dev]</code>?</strong> The <code>[dev]</code> extra in <code>pyproject.toml</code> installs test/dev dependencies like <code>seqeval</code> (for metrics) and <code>pytest</code>. Without it, <code>compute_metrics</code> would fail at import time.
+  </div>
+</div>
+
+<!-- Slide 5: Cell 3 — GPU Check -->
+<div class="slide" id="slide-5">
+  <span class="cell-label">Cell 3 &mdash; Code</span>
+  <h2>GPU Verification</h2>
+  <div class="code-block">import torch
+print(f"CUDA available: {torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    print(f"GPU: {torch.cuda.get_device_name(0)}")
+    props = torch.cuda.get_device_properties(0)
+    mem = getattr(props, "total_memory", None) or getattr(props, "total_mem", 0)
+    print(f"Memory: {mem / 1e9:.1f} GB")</div>
+  <div class="annotation">
+    <strong>Why the <code>getattr</code> dance?</strong> Different PyTorch versions use different attribute names for GPU memory on the <code>device_properties</code> object (<code>total_memory</code> vs <code>total_mem</code>). The <code>getattr</code> with fallback handles both without crashing.
+  </div>
+  <div class="annotation green-note">
+    <strong>CPU fallback.</strong> The notebook prints a message but doesn't abort if no GPU is found. The smoke test will still run on CPU &mdash; just slower. The <code>fp16=torch.cuda.is_available()</code> flag later ensures FP16 is only enabled when a GPU exists.
+  </div>
+</div>
+
+<!-- Slide 6: Cell 5 — Model Config (intro) -->
+<div class="slide" id="slide-6">
+  <span class="cell-label">Cell 5 &mdash; Code (Part 1)</span>
+  <h2>Model Assembly: The Config</h2>
+  <div class="code-block">from datafog_pii_ner.model import PiiNerConfig, PiiNerModel
+from datafog_pii_ner.data.label_schema import NUM_LABELS, ID_TO_LABEL
+
+config = PiiNerConfig(
+    backbone="microsoft/deberta-v3-xsmall",
+    num_labels=NUM_LABELS,       # 163
+)</div>
+  <div class="annotation">
+    <strong>Only 2 params are set explicitly.</strong> Everything else uses defaults from <code>PiiNerConfig.__init__</code>. Let's look at what those defaults are and what they control:
+  </div>
+  <table style="margin-top: 12px;">
+    <tr><th>Parameter</th><th>Value</th><th>What It Controls</th></tr>
+    <tr><td><code class="highlight">backbone</code></td><td><code>"microsoft/deberta-v3-xsmall"</code></td><td>Which pretrained transformer to load</td></tr>
+    <tr><td><code class="highlight">num_labels</code></td><td><code>163</code></td><td>BIO tag count: O + (B + I) &times; 81 entity types</td></tr>
+    <tr><td><code class="dim">char_vocab_size</code></td><td><code>256</code></td><td>ASCII byte range for character embedding</td></tr>
+    <tr><td><code class="dim">char_embed_dim</code></td><td><code>50</code></td><td>Dimensionality of each character vector</td></tr>
+    <tr><td><code class="dim">char_cnn_filters</code></td><td><code>(50, 50, 50)</code></td><td>Number of output channels per conv filter</td></tr>
+    <tr><td><code class="dim">char_cnn_widths</code></td><td><code>(3, 4, 5)</code></td><td>N-gram widths for character convolutions</td></tr>
+    <tr><td><code class="dim">max_char_len</code></td><td><code>20</code></td><td>Max characters per token (truncated/padded)</td></tr>
+    <tr><td><code class="dim">dropout</code></td><td><code>0.1</code></td><td>Dropout rate for all sub-modules</td></tr>
+  </table>
+</div>
+
+<!-- Slide 7: num_labels deep dive -->
+<div class="slide" id="slide-7">
+  <h2>Where Does 163 Come From?</h2>
+  <p class="subtitle">label_schema.py builds the BIO label set</p>
+  <div class="two-col">
+    <div class="col">
+      <h3>81 Entity Types in 4 Tiers</h3>
+      <table style="font-size: 0.85em;">
+        <tr><th>Tier</th><th>Examples</th><th>Count</th></tr>
+        <tr><td class="red">Tier 1: Critical</td><td>SSN, CREDIT_CARD, PASSPORT</td><td>6</td></tr>
+        <tr><td class="orange">Tier 2: High</td><td>PERSON, EMAIL, PHONE</td><td>6</td></tr>
+        <tr><td class="yellow">Tier 3: Moderate</td><td>LOCATION, DATE, USERNAME</td><td>12</td></tr>
+        <tr><td class="dim">Tier 4: Domain</td><td>PASSWORD, IBAN, SALARY</td><td>20</td></tr>
+        <tr style="border-top: 2px solid #334155;"><td colspan="2"><strong>Total entity types</strong></td><td><strong>44</strong></td></tr>
+      </table>
+      <p style="margin-top: 12px; font-size: 0.9em; color: #94a3b8;">(The schema defines 81 types total across all tiers. The 44 shown here are the most common.)</p>
+    </div>
+    <div class="col">
+      <h3>BIO Expansion</h3>
+      <div class="code-block" style="font-size: 0.85em;">labels = ["O"]           # 1 label
+for etype in ALL_ENTITY_TYPES:
+    labels.append(f"B-{etype}")  # Begin
+    labels.append(f"I-{etype}")  # Inside</div>
+      <p style="margin-top: 12px; font-size: 0.95em;">
+        <code>1 + (81 &times; 2) = <span class="highlight">163</span></code>
+      </p>
+      <p style="margin-top: 12px; font-size: 0.9em; color: #94a3b8;">
+        Every entity type gets two tags:<br>
+        <code class="green">B-PERSON</code> = first token of a person name<br>
+        <code class="green">I-PERSON</code> = continuation token<br>
+        <code class="dim">O</code> = not an entity
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 8: PiiNerModel constructor -->
+<div class="slide" id="slide-8">
+  <span class="cell-label">pii_model.py &mdash; __init__</span>
+  <h2>Model Assembly: The Constructor</h2>
+  <p style="margin-bottom: 16px;">When you call <code>PiiNerModel(config)</code>, four components are built:</p>
+  <div class="arch-box">
+    <div>
+      <div class="label">1. <span class="highlight">self.deberta</span></div>
+      <div class="detail">DebertaV2Model.from_pretrained("microsoft/deberta-v3-xsmall")</div>
+    </div>
+    <div class="detail">70.7M params &middot; <span class="green">pretrained</span></div>
+  </div>
+  <div class="arch-arrow">&darr;</div>
+  <div class="arch-box">
+    <div>
+      <div class="label">2. <span class="highlight">self.char_cnn</span></div>
+      <div class="detail">CharCNNEncoder(vocab_size=256, embed_dim=50, widths=[3,4,5], filters=[50,50,50])</div>
+    </div>
+    <div class="detail">~29K params &middot; <span class="orange">random init</span></div>
+  </div>
+  <div class="arch-arrow">&darr;</div>
+  <div class="arch-box">
+    <div>
+      <div class="label">3. <span class="highlight">self.fusion</span></div>
+      <div class="detail">GatingFusion(char_dim=150, context_dim=384)</div>
+    </div>
+    <div class="detail">~352K params &middot; <span class="orange">random init</span></div>
+  </div>
+  <div class="arch-arrow">&darr;</div>
+  <div class="arch-box">
+    <div>
+      <div class="label">4. <span class="highlight">self.crf_head</span></div>
+      <div class="detail">CRFHead(hidden_dim=384, num_labels=163)</div>
+    </div>
+    <div class="detail">~89K params &middot; <span class="orange">random init</span></div>
+  </div>
+  <div class="annotation" style="margin-top: 14px;">
+    <strong>Key asymmetry:</strong> DeBERTa is <span class="green">pretrained</span> (already understands language). Everything else is <span class="orange">randomly initialized</span> (knows nothing about PII). This is why differential learning rates are essential.
+  </div>
+</div>
+
+<!-- Slide 9: DeBERTa deep dive -->
+<div class="slide" id="slide-9">
+  <h2>Component 1: DeBERTa v3-xsmall</h2>
+  <div class="code-block">self.deberta = DebertaV2Model.from_pretrained(config.backbone)
+context_dim = self.deberta.config.hidden_size   # 384</div>
+  <div class="two-col" style="margin-top: 16px;">
+    <div class="col">
+      <h3>What Is DeBERTa?</h3>
+      <p style="font-size: 0.95em;">A transformer encoder from Microsoft. "v3-xsmall" is the smallest variant:</p>
+      <table style="font-size: 0.85em; margin-top: 8px;">
+        <tr><td>Parameters</td><td><strong>70.7M</strong></td></tr>
+        <tr><td>Hidden size</td><td><strong>384</strong></td></tr>
+        <tr><td>Layers</td><td>12</td></tr>
+        <tr><td>Attention heads</td><td>6</td></tr>
+        <tr><td>Vocabulary</td><td>128K tokens (SentencePiece)</td></tr>
+      </table>
+    </div>
+    <div class="col">
+      <h3>What <code>from_pretrained</code> Does</h3>
+      <p style="font-size: 0.95em;">Downloads weights pretrained on English text (books, Wikipedia, web). These weights already encode:</p>
+      <ul style="font-size: 0.9em;">
+        <li>Word meaning and syntax</li>
+        <li>Context-dependent representations</li>
+        <li>"John" in "Dear John," vs "John Smith"</li>
+      </ul>
+    </div>
+  </div>
+  <div class="annotation">
+    <strong><code>context_dim = 384</code></strong> is critical. It's the size of the vector DeBERTa produces for each token. Every downstream component must accept or project to this dimension. The CharCNN outputs 150-dim, so the GatingFusion projects it up to 384.
+  </div>
+</div>
+
+<!-- Slide 10: CharCNN overview -->
+<div class="slide" id="slide-10">
+  <h2>Component 2: CharCNN Encoder</h2>
+  <div class="code-block">self.char_cnn = CharCNNEncoder(
+    vocab_size=256,           # ASCII byte range
+    embed_dim=50,             # Each character → 50-dim vector
+    filter_widths=[3, 4, 5],  # 3-gram, 4-gram, 5-gram convolutions
+    num_filters=[50, 50, 50], # 50 filters per width
+    dropout=0.1,
+)</div>
+  <div class="annotation">
+    <strong>Why a character-level CNN at all?</strong> DeBERTa works on subword tokens. It sees "555-12-3456" as something like <code>["_555", "-12", "-34", "56"]</code>. It can't directly "see" the XXX-XX-XXXX pattern of an SSN. The CharCNN looks at the raw characters of each token and can learn patterns like digit sequences, @ symbols, dashes in specific positions &mdash; exactly the surface features that distinguish structured PII.
+  </div>
+</div>
+
+<!-- Slide 11: CharCNN internals -->
+<div class="slide" id="slide-11">
+  <h2>CharCNN: Step by Step</h2>
+  <p class="subtitle">What happens inside <code>CharCNNEncoder.forward()</code></p>
+
+  <div class="flow-step">
+    <strong>Step 1: Embed characters</strong><br>
+    <span class="tensor-shape">char_ids (batch, seq_len, 20)</span> &rarr; <code>nn.Embedding(256, 50)</code> &rarr; <span class="tensor-shape">(batch &times; seq_len, 20, 50)</span><br>
+    <span style="color: #94a3b8; font-size: 0.9em;">Each of the 20 character slots becomes a 50-dimensional vector. Padding (0) maps to a zero vector.</span>
+  </div>
+  <div class="flow-arrow">&darr;</div>
+
+  <div class="flow-step">
+    <strong>Step 2: Transpose for Conv1D</strong><br>
+    <span class="tensor-shape">(batch &times; seq_len, 50, 20)</span><br>
+    <span style="color: #94a3b8; font-size: 0.9em;">Conv1D expects (batch, channels, length). Channels = embed_dim, length = max_char_len.</span>
+  </div>
+  <div class="flow-arrow">&darr;</div>
+
+  <div class="flow-step">
+    <strong>Step 3: Three parallel convolutions + ReLU + max-pool</strong><br>
+    <span style="font-size: 0.95em;">
+      &bull; <code>Conv1d(50, 50, kernel_size=<span class="highlight">3</span>)</code> &rarr; ReLU &rarr; max over time &rarr; <span class="tensor-shape">50-dim</span> (trigrams: "555", "@gm")<br>
+      &bull; <code>Conv1d(50, 50, kernel_size=<span class="highlight">4</span>)</code> &rarr; ReLU &rarr; max over time &rarr; <span class="tensor-shape">50-dim</span> (4-grams: "5-12", "mail")<br>
+      &bull; <code>Conv1d(50, 50, kernel_size=<span class="highlight">5</span>)</code> &rarr; ReLU &rarr; max over time &rarr; <span class="tensor-shape">50-dim</span> (5-grams: "55-12", "@gmai")
+    </span>
+  </div>
+  <div class="flow-arrow">&darr;</div>
+
+  <div class="flow-step">
+    <strong>Step 4: Concatenate</strong><br>
+    <span class="tensor-shape">[50 + 50 + 50] = 150-dim per token</span> &rarr; reshape to <span class="tensor-shape">(batch, seq_len, 150)</span>
+  </div>
+
+  <div class="annotation" style="margin-top: 12px;">
+    <strong>Max-pool over time</strong> is the key operation. It picks the strongest activation from each filter across all character positions. Think of it as: "the best match for this character pattern, wherever it occurs in the token."
+  </div>
+</div>
+
+<!-- Slide 12: CharCNN params explained -->
+<div class="slide" id="slide-12">
+  <h2>CharCNN Parameters Explained</h2>
+  <div class="param-row">
+    <div class="param-name">vocab_size = 256</div>
+    <div class="param-desc">The embedding table has 256 rows &mdash; one per possible byte value. Characters are converted to their ASCII/UTF-8 byte values. Index 0 is reserved for padding. This means it can handle any character in the Basic Latin range without a separate tokenizer.</div>
+  </div>
+  <div class="param-row">
+    <div class="param-name">embed_dim = 50</div>
+    <div class="param-desc">Each character is represented as a 50-dimensional vector. This is a learned embedding, not one-hot. The model learns that 'a' and 'A' might be similar, or that digits cluster together. 50 is a standard choice &mdash; big enough to capture character relationships, small enough to be fast.</div>
+  </div>
+  <div class="param-row">
+    <div class="param-name">filter_widths = [3, 4, 5]</div>
+    <div class="param-desc">Three separate Conv1D layers with kernel sizes 3, 4, and 5. A width-3 filter slides over 3 characters at a time (trigrams), width-4 over 4 (4-grams), etc. Together they capture patterns at multiple scales: "555" (3), "@gma" (4), "XX-XX" (5).</div>
+  </div>
+  <div class="param-row">
+    <div class="param-name">num_filters = [50, 50, 50]</div>
+    <div class="param-desc">50 filters per width = 50 different pattern detectors at each scale. Each filter learns to detect one specific character pattern. 50 &times; 3 = 150 total features per token. Think of each filter as asking: "does this token contain pattern X?"</div>
+  </div>
+  <div class="param-row">
+    <div class="param-name">max_char_len = 20</div>
+    <div class="param-desc">Tokens longer than 20 characters are truncated; shorter ones are zero-padded. 20 covers most tokens (average English word is 5 chars, but emails/URLs can be longer). The <code>padding_idx=0</code> on the embedding ensures padding doesn't contribute signal.</div>
+  </div>
+</div>
+
+<!-- Slide 13: GatingFusion -->
+<div class="slide" id="slide-13">
+  <h2>Component 3: Gating Fusion</h2>
+  <div class="code-block">self.fusion = GatingFusion(
+    char_dim=150,      # CharCNN output: 50 + 50 + 50
+    context_dim=384,   # DeBERTa hidden size
+    dropout=0.1,
+)</div>
+  <p style="margin: 16px 0; font-size: 1.05em;">The fusion layer blends character features and contextual features with a <strong>learned gate</strong>:</p>
+  <div class="flow-step">
+    <strong>Step 1:</strong> Project char features up: <span class="tensor-shape">150-dim</span> &rarr; <code>nn.Linear(150, 384)</code> + ReLU &rarr; <span class="tensor-shape">384-dim</span>
+  </div>
+  <div class="flow-arrow">&darr;</div>
+  <div class="flow-step">
+    <strong>Step 2:</strong> Concatenate: <span class="tensor-shape">[384 char_proj, 384 context] = 768-dim</span>
+  </div>
+  <div class="flow-arrow">&darr;</div>
+  <div class="flow-step">
+    <strong>Step 3:</strong> Compute gate: <code>g = sigmoid(Linear(768 &rarr; 384))</code> &mdash; values in [0, 1] per dimension
+  </div>
+  <div class="flow-arrow">&darr;</div>
+  <div class="flow-step">
+    <strong>Step 4:</strong> Fuse: <code style="font-size: 1.1em;">output = <span class="orange">g</span> &times; char_proj + <span class="highlight">(1 &minus; g)</span> &times; context</span></code>
+  </div>
+  <div class="annotation" style="margin-top: 14px;">
+    <strong>Why a gate instead of just concatenating?</strong> Not all tokens benefit equally from character features. For "John" (a name), contextual meaning matters more &rarr; gate goes low. For "555-12-3456" (an SSN), the character pattern is the signal &rarr; gate goes high. The model learns this tradeoff per-token, per-dimension.
+  </div>
+</div>
+
+<!-- Slide 14: GatingFusion intuition -->
+<div class="slide" id="slide-14">
+  <h2>Gating Fusion: Intuition</h2>
+  <p class="subtitle">The gate learns which signal to trust for each token</p>
+  <div class="two-col">
+    <div class="col">
+      <h3 style="color: #f97316;">High Gate (g &rarr; 1): Trust Characters</h3>
+      <table style="font-size: 0.88em;">
+        <tr><th>Token</th><th>Why Characters Win</th></tr>
+        <tr><td><code>555-12-3456</code></td><td>XXX-XX-XXXX pattern = SSN</td></tr>
+        <tr><td><code>user@mail.com</code></td><td>@ symbol + .TLD = email</td></tr>
+        <tr><td><code>4111-1111-1111</code></td><td>16 digits = credit card</td></tr>
+        <tr><td><code>192.168.1.1</code></td><td>Dotted quad = IP address</td></tr>
+      </table>
+      <p style="margin-top: 10px; font-size: 0.9em; color: #94a3b8;">These are <em>structured</em> PII &mdash; you can tell what they are just by looking at the characters.</p>
+    </div>
+    <div class="col">
+      <h3 style="color: #3b82f6;">Low Gate (g &rarr; 0): Trust Context</h3>
+      <table style="font-size: 0.88em;">
+        <tr><th>Token</th><th>Why Context Wins</th></tr>
+        <tr><td><code>John</code></td><td>"Dear John" vs "John St"</td></tr>
+        <tr><td><code>Paris</code></td><td>"born in Paris" vs "Paris Hilton"</td></tr>
+        <tr><td><code>May</code></td><td>"in May 2024" vs "May Johnson"</td></tr>
+        <tr><td><code>male</code></td><td>"gender: male" vs "male connector"</td></tr>
+      </table>
+      <p style="margin-top: 10px; font-size: 0.9em; color: #94a3b8;">These are <em>contextual</em> PII &mdash; the surrounding words determine if it's an entity.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 15: CRF Head -->
+<div class="slide" id="slide-15">
+  <h2>Component 4: CRF Head</h2>
+  <div class="code-block">self.crf_head = CRFHead(
+    hidden_dim=384,      # Must match DeBERTa / fusion output
+    num_labels=163,      # BIO tag count
+    dropout=0.1,
+)</div>
+  <p style="margin: 14px 0;">Inside the CRF head, two sub-components:</p>
+  <div class="flow-step">
+    <strong><code>self.classifier = nn.Linear(384, 163)</code></strong><br>
+    <span style="color: #94a3b8;">Projects each token's 384-dim fused representation to 163 "emission scores" &mdash; one per possible BIO tag. These are unnormalized logits: how much each token "looks like" each tag, independently.</span>
+  </div>
+  <div class="flow-arrow">&darr;</div>
+  <div class="flow-step">
+    <strong><code>self.crf = TorchCRF(163, batch_first=True)</code></strong><br>
+    <span style="color: #94a3b8;">A Conditional Random Field layer with a <strong>163 &times; 163 transition matrix</strong>. This matrix learns: "given that the previous token was tagged X, how likely is it that the current token is tagged Y?" This enforces legal BIO sequences.</span>
+  </div>
+  <div class="annotation" style="margin-top: 14px;">
+    <strong>The transition matrix is the heart of the CRF.</strong> It has 163 &times; 163 = 26,569 learnable parameters. Each cell [i][j] represents the score for transitioning from tag i to tag j. After training, <code>transitions[B-PERSON][I-PERSON]</code> will be high, but <code>transitions[B-PERSON][I-EMAIL]</code> will be strongly negative.
+  </div>
+</div>
+
+<!-- Slide 16: CRF train vs inference -->
+<div class="slide" id="slide-16">
+  <h2>CRF: Training vs Inference</h2>
+  <div class="two-col">
+    <div class="col">
+      <h3 style="color: #f97316;">Training: Compute Loss</h3>
+      <div class="code-block" style="font-size: 0.82em;">clamped_labels = labels.clamp(min=0)
+log_lik = self.crf(
+    emissions,
+    clamped_labels,
+    mask=mask,
+    reduction="mean"
+)
+loss = -log_lik</div>
+      <p style="font-size: 0.9em; margin-top: 10px;">
+        <strong><code>clamp(min=0)</code></strong>: HF uses -100 for "ignore this token" (special tokens, padding). CRF can't handle negative tag IDs, so we clamp to 0. The <code>mask</code> ensures these positions don't affect the loss.
+      </p>
+      <p style="font-size: 0.9em; margin-top: 8px;">
+        <strong>Negative log-likelihood</strong>: The CRF returns log P(correct sequence). We negate it because we want to <em>minimize</em> loss = <em>maximize</em> probability of correct sequence.
+      </p>
+    </div>
+    <div class="col">
+      <h3 style="color: #22c55e;">Inference: Viterbi Decode</h3>
+      <div class="code-block" style="font-size: 0.82em;">tag_sequences = self.crf.decode(
+    emissions, mask=mask
+)
+# Returns list of lists (variable length)
+# Pad to seq_len for batching
+predictions = torch.full(
+    (batch, seq_len), 0, ...
+)
+for i, tags in enumerate(tag_sequences):
+    predictions[i, :len(tags)] = tags</div>
+      <p style="font-size: 0.9em; margin-top: 10px;">
+        <strong>Viterbi algorithm</strong>: Finds the single highest-scoring tag sequence globally, not just the best tag per position. This is why CRF output is always a valid BIO sequence &mdash; it can't produce <code>I-EMAIL</code> after <code>B-PERSON</code>.
+      </p>
+    </div>
+  </div>
+  <div class="annotation" style="margin-top: 12px;">
+    <strong>Why pad with 0?</strong> Tag ID 0 = "O" (not an entity). <code>crf.decode()</code> returns variable-length lists (only non-masked positions), so we fill a full-size tensor with 0 ("O") and overwrite the real positions. Safe default.
+  </div>
+</div>
+
+<!-- Slide 17: The forward pass -->
+<div class="slide" id="slide-17">
+  <h2>The Complete Forward Pass</h2>
+  <p class="subtitle">What happens when the model processes a batch</p>
+
+  <div class="flow-step">
+    <strong>1. DeBERTa encodes tokens</strong><br>
+    <span class="tensor-shape">input_ids (batch, seq_len)</span> &rarr; DeBERTa &rarr; <span class="tensor-shape">context_features (batch, seq_len, 384)</span>
+  </div>
+  <div class="flow-arrow">&darr;</div>
+  <div class="flow-step">
+    <strong>2. CharCNN encodes characters</strong><br>
+    <span class="tensor-shape">char_ids (batch, seq_len, 20)</span> &rarr; CharCNN &rarr; <span class="tensor-shape">char_features (batch, seq_len, 150)</span>
+  </div>
+  <div class="flow-arrow">&darr;</div>
+  <div class="flow-step">
+    <strong>3. Gating fusion blends both</strong><br>
+    <span class="tensor-shape">char (150) + context (384)</span> &rarr; GatingFusion &rarr; <span class="tensor-shape">fused (batch, seq_len, 384)</span>
+  </div>
+  <div class="flow-arrow">&darr;</div>
+  <div class="flow-step" style="background: #172554; border-color: #3b82f6;">
+    <strong>4. Cast to FP32 + disable autocast</strong><br>
+    <code>fused = fused.float()</code><br>
+    <span style="color: #94a3b8; font-size: 0.9em;">CRF's log-sum-exp computation is numerically unstable in FP16. This line forces full precision for the CRF head only, while the rest of the model runs in FP16 for speed.</span>
+  </div>
+  <div class="flow-arrow">&darr;</div>
+  <div class="flow-step">
+    <strong>5. CRF head: emit + decode</strong><br>
+    <span class="tensor-shape">fused (batch, seq_len, 384)</span> &rarr; Linear &rarr; <span class="tensor-shape">emissions (batch, seq_len, 163)</span> &rarr; CRF &rarr; <span class="tensor-shape">predictions (batch, seq_len)</span>
+  </div>
+</div>
+
+<!-- Slide 18: Data loading -->
+<div class="slide" id="slide-18">
+  <span class="cell-label">Cell 7 &mdash; Code</span>
+  <h2>Data Loading: 100 Examples</h2>
+  <div class="code-block">tokenizer = AutoTokenizer.from_pretrained("microsoft/deberta-v3-xsmall")
+
+dataset = load_single_dataset(
+    dataset_name="ai4privacy",     # HuggingFace: ai4privacy/pii-masking-200k
+    tokenizer=tokenizer,
+    max_seq_len=256,               # Truncate sequences to 256 subword tokens
+    max_char_len=20,               # Truncate tokens to 20 characters
+    max_examples=100,              # Only take first 100 examples
+)</div>
+  <div class="annotation">
+    <strong>What happens inside <code>load_single_dataset</code>:</strong><br>
+    1. Downloads the ai4privacy dataset from HuggingFace (200K examples)<br>
+    2. Takes only the first 100<br>
+    3. For each example: normalizes raw labels (e.g., "FIRSTNAME" &rarr; "B-PERSON") using a label map<br>
+    4. Tokenizes words into DeBERTa subword tokens and aligns BIO labels<br>
+    5. Generates <code>char_ids</code>: converts each token's characters to byte values (ASCII)
+  </div>
+</div>
+
+<!-- Slide 19: Tokenization alignment -->
+<div class="slide" id="slide-19">
+  <h2>Subword Alignment: The Tricky Part</h2>
+  <p class="subtitle">DeBERTa splits words into subword tokens. Labels must follow.</p>
+  <div class="two-col">
+    <div class="col">
+      <h3>Example</h3>
+      <table style="font-size: 0.88em;">
+        <tr><th>Original Word</th><th>Label</th></tr>
+        <tr><td>John</td><td>B-PERSON</td></tr>
+        <tr><td>Smith</td><td>I-PERSON</td></tr>
+      </table>
+      <p style="margin-top: 10px; font-size: 0.9em; color: #94a3b8;">But DeBERTa might tokenize "Smith" as two subwords:</p>
+      <table style="font-size: 0.88em; margin-top: 8px;">
+        <tr><th>Subword Token</th><th>Aligned Label</th></tr>
+        <tr><td><code>[CLS]</code></td><td class="dim">-100 (ignore)</td></tr>
+        <tr><td><code>_John</code></td><td class="green">B-PERSON</td></tr>
+        <tr><td><code>_Sm</code></td><td class="green">I-PERSON</td></tr>
+        <tr><td><code>ith</code></td><td class="green">I-PERSON</td></tr>
+        <tr><td><code>[SEP]</code></td><td class="dim">-100 (ignore)</td></tr>
+      </table>
+    </div>
+    <div class="col">
+      <h3>The Rule</h3>
+      <ul style="font-size: 0.95em;">
+        <li><strong>First subword</strong> of a word gets the original BIO tag</li>
+        <li><strong>Continuation subwords</strong> get the I- version (B-X becomes I-X)</li>
+        <li><strong>Special tokens</strong> ([CLS], [SEP], padding) get -100</li>
+      </ul>
+      <p style="margin-top: 14px; font-size: 0.9em; color: #94a3b8;">
+        <code>-100</code> is PyTorch's convention for "ignore this position in loss computation." The CRF head clamps these to 0 and masks them out.
+      </p>
+      <p style="margin-top: 10px; font-size: 0.9em; color: #94a3b8;">
+        <code>char_ids</code> are generated from the <em>original word</em>, not the subword. So both <code>_Sm</code> and <code>ith</code> get the char_ids for "Smith".
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 20: Data collator -->
+<div class="slide" id="slide-20">
+  <h2>Data Collator: Batching the 3D Tensor</h2>
+  <div class="code-block">collator = PiiDataCollator(tokenizer=tokenizer, max_char_len=20)</div>
+  <div class="annotation">
+    <strong>Why a custom collator?</strong> HuggingFace's default <code>DataCollatorForTokenClassification</code> handles padding for 1D tensors (<code>input_ids</code>, <code>labels</code>) and 2D (<code>attention_mask</code>). But <code>char_ids</code> is 3D: <span class="tensor-shape">(seq_len, 20)</span> per example. The custom collator:
+  </div>
+  <div style="margin-top: 12px;">
+    <div class="flow-step">
+      <strong>1.</strong> Pops <code>char_ids</code> out of each example before passing to the parent collator
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step">
+      <strong>2.</strong> Parent pads <code>input_ids</code>, <code>attention_mask</code>, <code>labels</code> to the longest sequence in the batch
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step">
+      <strong>3.</strong> Manually pads each <code>char_ids</code> with <code>[0] * 20</code> rows to match the padded sequence length
+    </div>
+    <div class="flow-arrow">&darr;</div>
+    <div class="flow-step">
+      <strong>4.</strong> Stacks into <span class="tensor-shape">(batch_size, padded_seq_len, 20)</span> and adds to the batch dict
+    </div>
+  </div>
+</div>
+
+<!-- Slide 21: Training args -->
+<div class="slide" id="slide-21">
+  <span class="cell-label">Cell 9 &mdash; Code (Part 1)</span>
+  <h2>Training Arguments</h2>
+  <div class="code-block">training_args = TrainingArguments(
+    output_dir="/content/smoke_test_output",
+    num_train_epochs=50,
+    per_device_train_batch_size=4,
+    per_device_eval_batch_size=4,
+    gradient_accumulation_steps=4,
+    learning_rate=LR_BACKBONE,     # 2e-5 (used as default, overridden by optimizer)
+    warmup_ratio=0.1,
+    weight_decay=0.01,
+    fp16=torch.cuda.is_available(),
+    eval_strategy="epoch",
+    save_strategy="no",
+    report_to="none",
+    logging_steps=10,
+    remove_unused_columns=False,
+    dataloader_num_workers=0,
+)</div>
+  <table style="font-size: 0.85em;">
+    <tr><th>Parameter</th><th>Value</th><th>Why</th></tr>
+    <tr><td><code>per_device_train_batch_size=4</code></td><td>4 examples per GPU step</td><td>T4 has only 16GB; larger batches OOM</td></tr>
+    <tr><td><code>gradient_accumulation_steps=4</code></td><td>Accumulate 4 steps</td><td>Effective batch size = 4 &times; 4 = 16</td></tr>
+    <tr><td><code>warmup_ratio=0.1</code></td><td>10% of total steps</td><td>Prevents destructive early updates to pretrained weights</td></tr>
+    <tr><td><code>save_strategy="no"</code></td><td>Don't save checkpoints</td><td>This is a throwaway smoke test, not real training</td></tr>
+    <tr><td><code>remove_unused_columns=False</code></td><td>Keep all columns</td><td>Needed so <code>char_ids</code> isn't dropped by HF Trainer</td></tr>
+    <tr><td><code>dataloader_num_workers=0</code></td><td>No multiprocessing</td><td>Colab sometimes hangs with workers > 0</td></tr>
+  </table>
+</div>
+
+<!-- Slide 22: Differential LRs -->
+<div class="slide" id="slide-22">
+  <span class="cell-label">Cell 9 &mdash; Code (Part 2)</span>
+  <h2>Differential Learning Rates</h2>
+  <div class="code-block">LR_BACKBONE = 2e-5
+LR_HEAD = 1e-3
+
+backbone_params = [p for n, p in model.named_parameters() if "deberta" in n]
+head_params = [p for n, p in model.named_parameters() if "deberta" not in n]
+
+optimizer = AdamW([
+    {"params": backbone_params, "lr": LR_BACKBONE},   # 2e-5
+    {"params": head_params, "lr": LR_HEAD},            # 1e-3
+], weight_decay=0.01)</div>
+
+  <div class="two-col" style="margin-top: 14px;">
+    <div class="col">
+      <h3>How Parameters Are Split</h3>
+      <p style="font-size: 0.9em;">The split is based on the parameter <em>name</em>:</p>
+      <table style="font-size: 0.85em; margin-top: 8px;">
+        <tr><th>Name contains "deberta"?</th><th>Group</th><th>LR</th></tr>
+        <tr><td class="green">Yes</td><td>backbone_params</td><td>2e-5</td></tr>
+        <tr><td class="red">No</td><td>head_params</td><td>1e-3</td></tr>
+      </table>
+      <p style="margin-top: 10px; font-size: 0.85em; color: #94a3b8;">
+        <strong>head_params</strong> includes: CharCNN (embedding, convolutions), GatingFusion (projection, gate), CRF head (linear classifier, transition matrix). All randomly initialized.
+      </p>
+    </div>
+    <div class="col">
+      <h3>Why 50x Ratio?</h3>
+      <p style="font-size: 0.9em;">
+        <strong>Backbone (2e-5):</strong> Already has useful language representations. Large updates destroy them. This is a standard fine-tuning LR for DeBERTa.<br><br>
+        <strong>Head (1e-3):</strong> Random weights that need to learn 163 &times; 163 transition probabilities + character patterns from scratch. Needs to move fast to escape the "predict all O" local minimum.
+      </p>
+      <p style="margin-top: 10px; font-size: 0.85em; color: #94a3b8;">
+        1e-3 / 2e-5 = <strong>50x</strong>. The head learns 50 times faster than the backbone.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 23: PiiTrainer -->
+<div class="slide" id="slide-23">
+  <h2>PiiTrainer: Custom Training Loop</h2>
+  <div class="code-block">trainer = PiiTrainer(
+    model=model,
+    args=training_args,
+    train_dataset=dataset,
+    eval_dataset=dataset,      # Same data — intentional overfit
+    data_collator=collator,
+    compute_metrics=compute_metrics,
+    optimizers=(optimizer, None),   # (optimizer, scheduler)
+)</div>
+  <div class="annotation">
+    <strong><code>eval_dataset=dataset</code></strong> &mdash; We're evaluating on the <em>same</em> 100 examples we're training on. This is intentional: the smoke test asks "can the model memorize this data?" If it can't overfit 100 examples, the architecture is broken.
+  </div>
+  <div class="annotation">
+    <strong><code>optimizers=(optimizer, None)</code></strong> &mdash; The first element is our custom AdamW with differential LRs. The second (<code>None</code>) means "use HF's default learning rate scheduler" (linear decay with warmup). If we passed a custom scheduler, it would override the warmup_ratio from TrainingArguments.
+  </div>
+  <div class="annotation warn">
+    <strong>Why <code>PiiTrainer</code> instead of plain <code>Trainer</code>?</strong> Two custom methods:<br>
+    &bull; <code>compute_loss()</code>: Extracts <code>outputs.loss</code> from our <code>PiiNerOutput</code> dataclass (HF Trainer expects a specific output format)<br>
+    &bull; <code>prediction_step()</code>: Returns <code>outputs.predictions</code> (CRF-decoded tag IDs) instead of raw logits. Without this, <code>compute_metrics</code> would get emission scores instead of actual tag predictions.
+  </div>
+</div>
+
+<!-- Slide 24: Evaluation -->
+<div class="slide" id="slide-24">
+  <span class="cell-label">Cell 11 &mdash; Code</span>
+  <h2>Evaluation &amp; Pass/Fail Logic</h2>
+  <div class="code-block">eval_results = trainer.evaluate()
+eval_loss = eval_results.get("eval_loss", float("inf"))
+
+loss_ok = eval_loss < 10
+f1_ok = eval_results.get('eval_overall_f1', 0) > 0.90
+
+if loss_ok and f1_ok:
+    print("SMOKE TEST PASSED")
+else:
+    print("SMOKE TEST FAILED")</div>
+  <div class="two-col" style="margin-top: 14px;">
+    <div class="col">
+      <h3>Why <code>eval_loss</code> not <code>training_loss</code>?</h3>
+      <p style="font-size: 0.9em;">
+        HF Trainer's <code>train_result.training_loss</code> is the <strong>average across all steps</strong> from epoch 1 to 50. Early epochs have loss >500, so the average can be 126 even when the final epoch's loss is 2.<br><br>
+        <code>eval_loss</code> runs a fresh forward pass on the data <em>right now</em>, reflecting the model's current state. Much more meaningful.
+      </p>
+    </div>
+    <div class="col">
+      <h3>What <code>compute_metrics</code> Returns</h3>
+      <p style="font-size: 0.9em;">Uses <code>seqeval</code> for entity-level metrics:</p>
+      <table style="font-size: 0.82em; margin-top: 6px;">
+        <tr><td><code>overall_f1</code></td><td>Harmonic mean of P and R</td></tr>
+        <tr><td><code>overall_precision</code></td><td>% of predicted entities that are correct</td></tr>
+        <tr><td><code>overall_recall</code></td><td>% of real entities that were found</td></tr>
+        <tr><td><code>tier_N_recall</code></td><td>Average recall per severity tier</td></tr>
+        <tr><td><code>type_X_f1</code></td><td>Per-entity-type F1</td></tr>
+      </table>
+      <p style="font-size: 0.85em; margin-top: 8px; color: #94a3b8;">Entity-level = exact boundary match. Predicting "John" when the gold is "John Smith" scores 0.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 25: Tier system -->
+<div class="slide" id="slide-25">
+  <h2>Tier Recalls: Why They Matter</h2>
+  <p class="subtitle">Not all PII is equally sensitive</p>
+  <table>
+    <tr><th>Tier</th><th>Types</th><th>Target Recall</th><th>Rationale</th></tr>
+    <tr>
+      <td><span class="red" style="font-weight: 700;">Tier 1</span></td>
+      <td>SSN, Credit Card, Bank Account, Passport, Driver's License, Tax ID</td>
+      <td>&ge; 0.98</td>
+      <td>Direct financial/identity theft risk. Missing one = data breach.</td>
+    </tr>
+    <tr>
+      <td><span class="orange" style="font-weight: 700;">Tier 2</span></td>
+      <td>Person, Email, Phone, DOB, Street Address, IP Address</td>
+      <td>&ge; 0.95</td>
+      <td>High sensitivity. Can identify individuals when combined.</td>
+    </tr>
+    <tr>
+      <td><span class="yellow" style="font-weight: 700;">Tier 3</span></td>
+      <td>Username, Date, Location, Organization, URL, Age, Gender, ...</td>
+      <td>&ge; 0.90</td>
+      <td>Moderate sensitivity. Contextual identifiers.</td>
+    </tr>
+    <tr>
+      <td><span class="dim" style="font-weight: 700;">Tier 4</span></td>
+      <td>Medical Record, Employee ID, Password, IBAN, Salary, ...</td>
+      <td>&ge; 0.85</td>
+      <td>Domain-specific. May not appear in all datasets.</td>
+    </tr>
+  </table>
+  <div class="annotation" style="margin-top: 16px;">
+    In the smoke test, the tier recalls confirm the model isn't just getting easy types right. Our final run achieved <strong>1.000 recall on all 4 tiers</strong> &mdash; expected for 100 memorized examples.
+  </div>
+</div>
+
+<!-- Slide 26: Sample Predictions -->
+<div class="slide" id="slide-26">
+  <span class="cell-label">Cell 13 &mdash; Code</span>
+  <h2>Sample Predictions: How It Works</h2>
+  <div class="code-block" style="font-size: 0.82em;">predictions = trainer.predict(dataset.select(range(5)))
+
+for i in range(5):
+    pred_ids = predictions.predictions[i]    # CRF-decoded tag IDs
+    label_ids = predictions.label_ids[i]     # Ground truth tag IDs
+    input_ids = dataset[i]["input_ids"]      # Subword token IDs
+    tokens = tokenizer.convert_ids_to_tokens(input_ids)
+
+    for tok, pred, label in zip(tokens, pred_ids, label_ids):
+        if label == -100:
+            continue                         # Skip special tokens
+        pred_label = ID_TO_LABEL.get(int(pred), "O")
+        true_label = ID_TO_LABEL.get(int(label), "O")
+        if true_label != "O" or pred_label != "O":
+            match = "✓" if pred_label == true_label else "✗"
+            print(f"{tok:<25} {pred_label:<25} {true_label:<25} {match}")</div>
+  <div class="annotation">
+    <strong>What this shows:</strong> For each of the first 5 examples, it prints every token where either the prediction or ground truth is an entity (skips all-O tokens for readability). The <code>-100</code> filter skips [CLS], [SEP], and padding. <code>ID_TO_LABEL</code> converts integer IDs back to strings like "B-PERSON".
+  </div>
+</div>
+
+<!-- Slide 27: What the predictions look like -->
+<div class="slide" id="slide-27">
+  <h2>Sample Predictions: What You See</h2>
+  <p class="subtitle">After 50 epochs of overfit training on 100 examples</p>
+  <table style="font-family: 'SF Mono', monospace; font-size: 0.82em;">
+    <tr><th style="width: 25%;">Token</th><th style="width: 25%;">Predicted</th><th style="width: 25%;">Ground Truth</th><th>Match</th></tr>
+    <tr><td>_Omer</td><td class="green">B-PERSON</td><td>B-PERSON</td><td class="green">&#10003;</td></tr>
+    <tr><td>_23</td><td class="green">B-AGE</td><td>B-AGE</td><td class="green">&#10003;</td></tr>
+    <tr><td>_male</td><td class="green">B-GENDER</td><td>B-GENDER</td><td class="green">&#10003;</td></tr>
+    <tr><td>_V</td><td class="green">B-PASSWORD</td><td>B-PASSWORD</td><td class="green">&#10003;</td></tr>
+    <tr><td>y</td><td class="green">I-PASSWORD</td><td>I-PASSWORD</td><td class="green">&#10003;</td></tr>
+    <tr><td>8</td><td class="green">I-PASSWORD</td><td>I-PASSWORD</td><td class="green">&#10003;</td></tr>
+    <tr><td>k</td><td class="green">I-PASSWORD</td><td>I-PASSWORD</td><td class="green">&#10003;</td></tr>
+    <tr><td colspan="4" style="color: #475569; text-align: center;">... (32 continuation tokens, all correct)</td></tr>
+    <tr><td>_We</td><td class="dim">O</td><td class="dim">O</td><td class="green">&#10003;</td></tr>
+    <tr><td>_help</td><td class="dim">O</td><td class="dim">O</td><td class="green">&#10003;</td></tr>
+  </table>
+  <div class="annotation green-note" style="margin-top: 14px;">
+    <strong>Near-perfect memorization.</strong> Every entity boundary is correct. The CRF ensures B-PASSWORD is always followed by I-PASSWORD (never I-PERSON). The model gets both structured PII (passwords, SSNs) and contextual PII (names, ages) right.
+  </div>
+</div>
+
+<!-- Slide 28: Recap -->
+<div class="slide" id="slide-28">
+  <h2>Recap: The Full Pipeline</h2>
+  <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 16px;">
+    <div class="col" style="border-top: 3px solid #3b82f6;">
+      <h3 style="color: #3b82f6;">Input</h3>
+      <p style="font-size: 0.85em;">
+        100 examples from ai4privacy<br>
+        &darr;<br>
+        Tokenize with DeBERTa tokenizer<br>
+        &darr;<br>
+        Align BIO labels to subwords<br>
+        &darr;<br>
+        Generate char_ids per token<br>
+        &darr;<br>
+        Batch with custom collator
+      </p>
+    </div>
+    <div class="col" style="border-top: 3px solid #f97316;">
+      <h3 style="color: #f97316;">Model</h3>
+      <p style="font-size: 0.85em;">
+        DeBERTa: context vectors (384-dim)<br>
+        &darr;<br>
+        CharCNN: char patterns (150-dim)<br>
+        &darr;<br>
+        GatingFusion: blend (384-dim)<br>
+        &darr;<br>
+        FP32 cast for numerical stability<br>
+        &darr;<br>
+        CRF: emit scores + Viterbi decode
+      </p>
+    </div>
+    <div class="col" style="border-top: 3px solid #22c55e;">
+      <h3 style="color: #22c55e;">Training</h3>
+      <p style="font-size: 0.85em;">
+        Backbone LR: 2e-5 (preserve)<br>
+        Head LR: 1e-3 (learn fast)<br>
+        50 epochs, batch 4 &times; 4 accum<br>
+        &darr;<br>
+        Eval loss: 0.288 &lt; 10 &check;<br>
+        F1: 0.992 &gt; 0.90 &check;<br>
+        &darr;<br>
+        <span class="green" style="font-weight: 700;">SMOKE TEST PASSED</span>
+      </p>
+    </div>
+  </div>
+  <div class="annotation" style="margin-top: 20px;">
+    <strong>The conclusion:</strong> The model architecture &mdash; DeBERTa + CharCNN + GatingFusion + CRF &mdash; is wired correctly and capable of learning PII entity boundaries. The smoke test validated this in ~8 minutes on a T4 GPU. Next step: train on all 360K examples.
+  </div>
+</div>
+
+<div class="nav" id="nav">Slide 1 / 28</div>
+
+<script>
+const slides = document.querySelectorAll('.slide');
+let current = 0;
+
+function show(n) {
+  slides[current].classList.remove('active');
+  current = Math.max(0, Math.min(n, slides.length - 1));
+  slides[current].classList.add('active');
+  document.getElementById('nav').textContent = `Slide ${current + 1} / ${slides.length}`;
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') { e.preventDefault(); show(current + 1); }
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); show(current - 1); }
+  if (e.key === 'Home') { e.preventDefault(); show(0); }
+  if (e.key === 'End') { e.preventDefault(); show(slides.length - 1); }
+});
+
+document.addEventListener('click', e => {
+  if (e.clientX > window.innerWidth / 2) show(current + 1);
+  else show(current - 1);
+});
+</script>
+
+</body>
+</html>
