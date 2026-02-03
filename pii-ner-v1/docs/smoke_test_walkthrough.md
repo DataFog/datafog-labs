@@ -257,3 +257,59 @@ The head retains standard AdamW (`eps=1e-8`) because it's randomly initialized a
 ### Why the Smoke Test Passed
 
 The smoke test used 100 examples with a different Colab environment (older PyTorch/Transformers). The NaN manifests specifically on real data at scale with PyTorch 2.9+ and Transformers 5.0. The CRF loss on real data (~490) is comparable to the smoke test's initial loss (~362), so the scale of loss is not the differentiator — the PyTorch version and its optimizer internals are.
+
+---
+
+## BF16 Forward Pass NaN on A100
+
+Even with the `eps=1.0` optimizer fix, training on A100 with `bf16=True` still produced NaN. This turned out to be a **separate issue** from the AdamW bug — NaN originates in DeBERTa's forward pass under BF16 mixed precision.
+
+### Symptoms
+
+Identical to the AdamW NaN (training loss 0.000000, val loss nan, all F1 zero), making it look like the same bug. The key differentiator: the `eps=1.0` fix was confirmed present (commit `941e573`), yet training still failed.
+
+### Root Cause: BF16 Mantissa Precision
+
+BF16 has only **7 bits of mantissa** (vs 10 for FP16, 23 for FP32). DeBERTa v3 uses disentangled attention with relative position encodings, which involves:
+- Large attention score matrices before softmax
+- Exponentiation in softmax (amplifies precision loss)
+- Layer norm with small denominators
+
+Under BF16, these operations lose enough precision to produce NaN in the attention mechanism — especially with real text data at batch_size=32, where attention patterns are more concentrated than synthetic random data.
+
+### Why the Preflight Check Didn't Catch It (Old Version)
+
+The original quick validation cell used:
+- `batch_size=4` (not the real `batch_size=32`)
+- `seq_len=32` (not the real `seq_len=256`)
+- Synthetic random data (uniformly distributed attention, not concentrated)
+
+Smaller sequences and random tokens produce more diffuse attention patterns that don't trigger BF16 overflow. Real text at full sequence length creates sharper attention spikes that overflow BF16's narrow mantissa.
+
+### The Fix
+
+**Use FP16 on all GPUs, never BF16.** FP16's 10-bit mantissa provides sufficient precision for DeBERTa's attention computation. Combined with:
+- `eps=1.0` for backbone AdamW (prevents optimizer NaN)
+- CRF head forced to FP32 via `fused.float()` + `autocast(enabled=False)`
+- Emission clamping `[-100, 100]` in CRF
+
+The gradient scaler required by FP16 is not a problem because the CRF loss and gradients flow through the FP32 path.
+
+### Updated Preflight Check
+
+The preflight cell was upgraded to catch future issues:
+1. Uses **full batch size and sequence length** (not reduced)
+2. Runs **5 steps** (not 3) to catch delayed NaN
+3. Explicitly checks `math.isnan(loss)` (HF Trainer v5.0 renders NaN as `0.000000`)
+4. Checks **all model weights** for NaN after training
+5. Verifies loss is **decreasing** (not stuck)
+6. **Raises RuntimeError** on failure — blocks training from proceeding
+
+### Summary of NaN Issues
+
+| Issue | Cause | Fix | Affected |
+|-------|-------|-----|----------|
+| AdamW bias-correction | eps=1e-8 makes updates ≈ ±lr | eps=1.0 for backbone | All GPUs |
+| BF16 forward pass | 7-bit mantissa overflows in attention | Use FP16 instead | A100/H100 |
+| CRF log-sum-exp | Extreme emission values | Clamp to [-100, 100] | All GPUs |
+| CRF precision | FP16 in CRF computation | Force FP32 via autocast bypass | All GPUs |
