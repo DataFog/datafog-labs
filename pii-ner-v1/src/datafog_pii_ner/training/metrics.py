@@ -35,10 +35,10 @@ def compute_metrics(eval_pred) -> dict:
     for pred_seq, label_seq in zip(predictions, labels):
         true_sent = []
         pred_sent = []
-        for p, l in zip(pred_seq, label_seq):
-            if l == -100:
+        for p, label in zip(pred_seq, label_seq):
+            if label == -100:
                 continue
-            true_sent.append(ID_TO_LABEL.get(int(l), "O"))
+            true_sent.append(ID_TO_LABEL.get(int(label), "O"))
             pred_sent.append(ID_TO_LABEL.get(int(p), "O"))
         true_labels.append(true_sent)
         pred_labels.append(pred_sent)

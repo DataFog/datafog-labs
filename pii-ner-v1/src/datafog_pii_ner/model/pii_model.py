@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 
 import torch
-import torch.nn as nn
 from transformers import DebertaV2Model, DebertaV2PreTrainedModel, PretrainedConfig
 from transformers.utils import ModelOutput
 
