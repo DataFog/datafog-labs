@@ -236,7 +236,7 @@
     <h1>Smoke Test Walkthrough</h1>
     <p class="subtitle">How we validated model wiring by overfitting on 100 examples</p>
     <div style="margin-top: 48px; color: #475569; font-size: 1.1em;">
-      DeBERTa v3-xsmall + Char CNN + CRF &nbsp;&middot;&nbsp; 71M parameters &nbsp;&middot;&nbsp; 163 BIO tags
+      DeBERTa v3-xsmall + Char CNN + CRF &nbsp;&middot;&nbsp; 71M parameters &nbsp;&middot;&nbsp; 89 BIO tags
     </div>
   </div>
 </div>
@@ -309,7 +309,7 @@
       <div class="arch-arrow">&darr;</div>
       <div class="arch-box" style="border-color: #3b82f6;">
         <div>
-          <div class="label" style="color: #60a5fa;">163 BIO Tag Predictions</div>
+          <div class="label" style="color: #60a5fa;">89 BIO Tag Predictions</div>
           <div class="detail">O, B-PERSON, I-PERSON, B-EMAIL, I-EMAIL, ...</div>
         </div>
       </div>
@@ -368,7 +368,7 @@ Pred:   B-PER   I-PER   O       O</div>
   Already good representations get destroyed
 
 Random CRF head ────[5e-4]──&gt; Too low!
-  Can't learn 163x163 transitions fast enough</div>
+  Can't learn 89x89 transitions fast enough</div>
         <p style="margin-top: 16px; font-size: 1em;">One LR can't serve two components with completely different needs.</p>
       </div>
     </div>
@@ -661,7 +661,7 @@ Score: 0.0   &larr; close but no credit</div>
 <div class="slide" id="s14">
   <div>
     <h2>How BIO Tagging Works</h2>
-    <p style="margin-bottom: 24px;">Every token gets one of 163 labels: <code style="background:#1e293b; padding: 2px 8px; border-radius: 4px;">O</code> (outside), <code style="background:#1e293b; padding: 2px 8px; border-radius: 4px;">B-TYPE</code> (begin entity), or <code style="background:#1e293b; padding: 2px 8px; border-radius: 4px;">I-TYPE</code> (inside entity).</p>
+    <p style="margin-bottom: 24px;">Every token gets one of 89 labels: <code style="background:#1e293b; padding: 2px 8px; border-radius: 4px;">O</code> (outside), <code style="background:#1e293b; padding: 2px 8px; border-radius: 4px;">B-TYPE</code> (begin entity), or <code style="background:#1e293b; padding: 2px 8px; border-radius: 4px;">I-TYPE</code> (inside entity).</p>
     <div class="example-box">
       <div class="example-title">Example: "Contact Kattie at john@acme.com"</div>
       <table style="margin: 0; font-size: 1em;">

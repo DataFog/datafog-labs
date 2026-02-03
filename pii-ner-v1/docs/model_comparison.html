@@ -170,7 +170,7 @@
 <div class="section-title" id="tldr">0. The 30-Second Version</div>
 
 <div class="a">
-  <p><span class="model-tag tag-spacy">SpaCy</span> is fast and cheap but can only find about 7 out of 81 PII types. It needs regex bolted on for everything else. Good baseline, not a real PII solution on its own.</p>
+  <p><span class="model-tag tag-spacy">SpaCy</span> is fast and cheap but can only find about 7 out of 44 PII types. It needs regex bolted on for everything else. Good baseline, not a real PII solution on its own.</p>
   <p><span class="model-tag tag-gliner">GLiNER 2</span> is flexible and can find any entity type you describe, without retraining. But it's 9x larger, 5-8x slower, degrades past 30 entity types, and has no character-level features for structured PII like SSNs.</p>
   <p><span class="model-tag tag-datafog">DataFog v1</span> is purpose-built for PII. Smaller, faster, with character-level pattern detection and CRF sequence constraints. But it's unproven &mdash; the smoke test passed, but full training hasn't happened yet.</p>
   <div class="callout">
@@ -204,7 +204,7 @@
 <div class="q">What is DataFog PII-NER v1?</div>
 <div class="a">
   <p>Our model. DeBERTa-v3-xsmall (70.7M params, 384-dim) combined with a Character CNN (catches patterns like XXX-XX-XXXX), a gating fusion layer (dynamically blends character and context signals per token), and a CRF head (enforces valid BIO tag sequences).</p>
-  <p>It's designed from the ground up for one task: finding PII in English text. Fixed taxonomy of 81 entity types, 4 severity tiers, trained on 360K PII-specific examples. Target: ONNX INT8, ~25 MB, runs on CPU at ~10ms per 128 tokens.</p>
+  <p>It's designed from the ground up for one task: finding PII in English text. Fixed taxonomy of 44 entity types, 4 severity tiers, trained on 360K PII-specific examples. Target: ONNX INT8, ~25 MB, runs on CPU at ~10ms per 128 tokens.</p>
   <div class="callout warn">
     <strong>Important caveat:</strong> The smoke test passed (F1 0.992 on 100 memorized examples). Full training on 360K examples hasn't happened yet. The performance targets below are projections based on architecture design and literature, not measured results. SpaCy and GLiNER numbers are real. Ours are a bet.
   </div>
@@ -244,7 +244,7 @@
       <td><strong>PII types (native)</strong></td>
       <td class="orange">~7 (PERSON, ORG, GPE, LOC, DATE, TIME, MONEY)</td>
       <td class="green">Any (zero-shot, user-specified)</td>
-      <td class="green">81 fixed types across 4 tiers</td>
+      <td class="green">44 fixed types across 4 tiers</td>
     </tr>
     <tr>
       <td><strong>Structured PII<br>(SSN, CC, email)</strong></td>
@@ -524,7 +524,7 @@
     <tr style="background: #172554;">
       <td><span class="model-tag tag-datafog">DataFog v1 (planned)</span></td>
       <td class="dim"><strong>TBD</strong></td>
-      <td>~359K combined: AI4Privacy (209K) + Nemotron (100K) + Gretel (50K), 81 types</td>
+      <td>~359K combined: AI4Privacy (209K) + Nemotron (100K) + Gretel (50K), 44 types</td>
       <td>Held-out splits + cross-dataset eval</td>
       <td class="green"><strong>Both</strong> &mdash; in-dist + cross-dataset planned</td>
     </tr>
@@ -552,7 +552,7 @@
 <div class="q">What about that "custom transformer" that got 0.95 F1 in the arxiv benchmark?</div>
 <div class="a">
   <p>That number is real but misleading for our purposes. It was measured on <strong>CoNLL-2003</strong>, which has only 4 entity types: PERSON, LOCATION, ORGANIZATION, and MISC. The training data is ~14K sentences of Reuters newswire &mdash; real text, not synthetic.</p>
-  <p>Detecting 4 entity types in clean newswire text is a fundamentally easier task than detecting 46-81 PII types in diverse synthetic or real-world documents. A 0.95 on CoNLL-2003 doesn't tell us anything about how that model would perform on SSNs, credit cards, or medical record numbers &mdash; because those entities don't exist in CoNLL-2003.</p>
+  <p>Detecting 4 entity types in clean newswire text is a fundamentally easier task than detecting 44-55 PII types in diverse synthetic or real-world documents. A 0.95 on CoNLL-2003 doesn't tell us anything about how that model would perform on SSNs, credit cards, or medical record numbers &mdash; because those entities don't exist in CoNLL-2003.</p>
   <p>The useful takeaway: fine-tuned transformers <em>with CRF</em> consistently outperform other approaches on NER. The CRF in that same benchmark scored 0.93, nearly matching the custom transformer. Our architecture includes both.</p>
 </div>
 
@@ -592,7 +592,7 @@
       <td><strong>Combined</strong></td>
       <td><strong>~359K</strong></td>
       <td><strong>3 different generators</strong></td>
-      <td><strong>~81 (after normalization)</strong></td>
+      <td><strong>~44 (after normalization)</strong></td>
       <td><strong>Hundreds of domains</strong></td>
     </tr>
   </table>
@@ -696,7 +696,7 @@
   <p>Three things:</p>
   <p><strong>1. See character patterns.</strong> GLiNER and SpaCy operate on subword tokens. They never see the raw characters. Our CharCNN looks at the actual characters of each token and can learn that "three digits, dash, two digits, dash, four digits" is an SSN pattern. GLiNER sees <code>["_555", "-12", "-34", "56"]</code> and has to learn the pattern indirectly from subword token co-occurrence. This is why NVIDIA's GLiNER-PII gets only 0.64 F1 on AI4Privacy despite being 460M parameters.</p>
   <p><strong>2. Enforce sequence validity.</strong> Our CRF head physically cannot output <code>I-EMAIL</code> after <code>B-PERSON</code>. The transition matrix makes that transition score negative infinity. GLiNER uses span matching with greedy decoding &mdash; it can produce contradictory extractions (overlapping spans with different types) and has no mechanism to enforce sequential BIO constraints.</p>
-  <p><strong>3. Run without entity type tokens in the input.</strong> GLiNER prepends entity type names as tokens, which means: (a) the effective sequence gets longer, (b) with 50+ types, you're adding 50+ tokens to every input, and (c) performance degrades beyond ~30 types because the entity type tokens compete with the actual text for attention. Our model always predicts over all 81 types simultaneously with zero additional input overhead.</p>
+  <p><strong>3. Run without entity type tokens in the input.</strong> GLiNER prepends entity type names as tokens, which means: (a) the effective sequence gets longer, (b) with 50+ types, you're adding 50+ tokens to every input, and (c) performance degrades beyond ~30 types because the entity type tokens compete with the actual text for attention. Our model always predicts over all 44 types simultaneously with zero additional input overhead.</p>
 </div>
 
 <div class="q">What can GLiNER do that our model fundamentally can't?</div>

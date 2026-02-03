@@ -34,7 +34,7 @@ Input text
 └──────────┬───────────┘
            │
            ▼
-   163 BIO tag predictions
+   89 BIO tag predictions
    (O, B-PERSON, I-PERSON, B-EMAIL, I-EMAIL, ...)
 ```
 
@@ -88,7 +88,7 @@ A flat 5e-4 learning rate does two bad things simultaneously:
 
 1. **Too high for DeBERTa (pretrained):** The backbone already has useful language representations from pretraining. A 5e-4 LR destroys these features in the first few steps. This is visible in the epoch-2 training loss spike to 1241 — the model briefly got *worse* because the pretrained weights were corrupted.
 
-2. **Too low for the CRF head (random init):** The CRF head starts from random weights and needs to learn 163 × 163 transition probabilities from scratch. At 5e-4, it can't learn fast enough to escape the all-`O` prediction trap.
+2. **Too low for the CRF head (random init):** The CRF head starts from random weights and needs to learn 89 × 89 transition probabilities from scratch. At 5e-4, it can't learn fast enough to escape the all-`O` prediction trap.
 
 ```
 Pretrained backbone ──[5e-4]──► Representations destroyed
@@ -171,7 +171,7 @@ Entities emerged in order of frequency and distinctiveness:
 The original threshold was `loss < 0.1`, based on cross-entropy intuition. CRF loss can't reach 0.1 because:
 
 1. CRF loss = -log P(correct sequence | input)
-2. The partition function sums over **all possible tag sequences** (163^seq_len paths)
+2. The partition function sums over **all possible tag sequences** (89^seq_len paths)
 3. Even at near-perfect prediction, there's residual probability mass on alternative sequences
 4. A CRF loss of 0.8 at epoch 50 means the model assigns ~45% probability to the exact correct sequence out of an astronomically large space
 

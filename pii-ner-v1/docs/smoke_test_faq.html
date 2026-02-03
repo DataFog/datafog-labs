@@ -165,9 +165,9 @@
   </div>
 </div>
 
-<div class="q">Is 384 hidden dimensions enough to represent 163 different tags?</div>
+<div class="q">Is 384 hidden dimensions enough to represent 89 different tags?</div>
 <div class="a">
-  <p>Yes, and it's not even close to the limit. Think of it this way: the final linear layer is <code>nn.Linear(384, 163)</code>. Each of the 163 tags gets a 384-dimensional "template" vector (one row of the weight matrix). The model asks: "which template does this token's representation look most like?" 384 dimensions is plenty of room for 163 templates to be distinct from each other.</p>
+  <p>Yes, and it's not even close to the limit. Think of it this way: the final linear layer is <code>nn.Linear(384, 89)</code>. Each of the 89 tags gets a 384-dimensional "template" vector (one row of the weight matrix). The model asks: "which template does this token's representation look most like?" 384 dimensions is plenty of room for 89 templates to be distinct from each other.</p>
   <p>The actual bottleneck isn't the final projection &mdash; it's whether the 384-dim representations from DeBERTa are <em>rich enough</em> to distinguish ambiguous entities. Can a 384-dim vector capture the difference between "May" the month and "May" the name? Probably yes, because the transformer encodes the surrounding context. But a 768-dim vector would capture it with more headroom.</p>
 </div>
 
@@ -211,7 +211,7 @@
 <div class="q">Is 50 filters per width enough?</div>
 <div class="a">
   <p>50 per width gives us 150 total features. That's 150 different character patterns the model can detect per token. For a model that's primarily relying on the 384-dim DeBERTa features and only using character features as supplementary signal, 150 is reasonable.</p>
-  <p>The question is whether 50 filters are enough to cover all the character patterns across 81 entity types. Some entity types share patterns (credit cards, IBANs, and phone numbers all involve digit sequences), so there's reuse. But 50 is toward the lower end of what papers typically use.</p>
+  <p>The question is whether 50 filters are enough to cover all the character patterns across 44 entity types. Some entity types share patterns (credit cards, IBANs, and phone numbers all involve digit sequences), so there's reuse. But 50 is toward the lower end of what papers typically use.</p>
   <div class="callout experiment">
     <strong>Worth trying:</strong> Bump to 100 filters per width (300 total). This doubles the CharCNN parameter count (~29K to ~58K), which is trivial relative to the 70M backbone. If structured PII types (Tier 1: SSN, credit cards) improve noticeably, the extra filters were needed.
   </div>
@@ -252,7 +252,7 @@
 <div class="a">
   <p>Concatenation is the simpler approach: just stick the 150-dim char features and 384-dim context features together to get a 534-dim vector, then let the linear layer sort it out. This works, and many papers do it.</p>
   <p>The gate adds something concatenation can't: <em>per-token, per-dimension control</em> over which signal to trust. For the token "555" in "SSN: 555-12-3456", the gate can go high (trust characters). For "John" in "My name is John", the gate can go low (trust context). Concatenation passes both signals equally and hopes the downstream classifier figures it out.</p>
-  <p>The practical difference is usually small (maybe 0.2-0.5 F1), but it matters more when your entity types span the full range from structured (SSN) to contextual (PERSON). That's exactly our case with 81 entity types.</p>
+  <p>The practical difference is usually small (maybe 0.2-0.5 F1), but it matters more when your entity types span the full range from structured (SSN) to contextual (PERSON). That's exactly our case with 44 entity types.</p>
   <div class="callout experiment">
     <strong>Worth trying:</strong> Replace GatingFusion with simple concatenation + a linear projection as a baseline. If the gate version wins clearly on structured PII types (SSN, credit cards) but is similar on contextual types (PERSON, LOCATION), the gate is doing its job.
   </div>
@@ -271,17 +271,17 @@
 <div class="q">Why CRF instead of a regular softmax classifier?</div>
 <div class="a">
   <p>A softmax classifier predicts each token's tag independently. It looks at token 5, says "B-PERSON" with 80% confidence, moves on to token 6, says "I-EMAIL" with 70% confidence. Nobody checks whether B-PERSON followed by I-EMAIL is legal. It's not &mdash; you can't continue an EMAIL entity that was never started.</p>
-  <p>The CRF predicts the <em>entire sequence</em> jointly. It has a 163&times;163 transition matrix that scores every possible tag-to-tag transition. During training, it learns that <code>B-PERSON &rarr; I-PERSON</code> should have a high transition score and <code>B-PERSON &rarr; I-EMAIL</code> should be deeply negative. At inference, the Viterbi algorithm finds the globally best tag sequence, so it literally cannot produce invalid transitions.</p>
+  <p>The CRF predicts the <em>entire sequence</em> jointly. It has an 89&times;89 transition matrix that scores every possible tag-to-tag transition. During training, it learns that <code>B-PERSON &rarr; I-PERSON</code> should have a high transition score and <code>B-PERSON &rarr; I-EMAIL</code> should be deeply negative. At inference, the Viterbi algorithm finds the globally best tag sequence, so it literally cannot produce invalid transitions.</p>
   <div class="callout">
-    <strong>How much does it help?</strong> On standard NER benchmarks (CoNLL-2003 with 4 entity types), CRF adds about 0.2-0.5 F1 over softmax on top of a transformer. That's a modest but consistent gain. However, we have <strong>81 entity types</strong> (163 BIO tags), which means many more ways to produce illegal transitions. The CRF's advantage likely grows with the number of labels because there are more constraint violations for it to prevent. With only 4 types, a transformer can implicitly learn the transition patterns. With 81 types, explicit enforcement helps more.
+    <strong>How much does it help?</strong> On standard NER benchmarks (CoNLL-2003 with 4 entity types), CRF adds about 0.2-0.5 F1 over softmax on top of a transformer. That's a modest but consistent gain. However, we have <strong>44 entity types</strong> (89 BIO tags), which means many more ways to produce illegal transitions. The CRF's advantage likely grows with the number of labels because there are more constraint violations for it to prevent. With only 4 types, a transformer can implicitly learn the transition patterns. With 44 types, explicit enforcement helps more.
   </div>
 </div>
 
-<div class="q">The transition matrix is 163&times;163 = 26,569 parameters. Is that a lot? Does it scale badly?</div>
+<div class="q">The transition matrix is 89&times;89 = 7,921 parameters. Is that a lot? Does it scale badly?</div>
 <div class="a">
-  <p>26,569 parameters is tiny. The DeBERTa backbone has 70.7 million. The transition matrix is 0.04% of the model.</p>
-  <p>The computational cost is a different story. CRF training requires computing the "partition function" &mdash; summing over all possible tag sequences. The Viterbi algorithm and forward algorithm both run in O(T &times; N&sup2;) time, where T is sequence length and N is the number of tags. With N=163 and T=256, that's 163&sup2; &times; 256 &asymp; 6.8 million operations per example. That's significant but still fast on a GPU.</p>
-  <p>If you went to, say, 500 tags, the N&sup2; cost would start to hurt. At 163 it's fine.</p>
+  <p>7,921 parameters is tiny. The DeBERTa backbone has 70.7 million. The transition matrix is 0.01% of the model.</p>
+  <p>The computational cost is a different story. CRF training requires computing the "partition function" &mdash; summing over all possible tag sequences. The Viterbi algorithm and forward algorithm both run in O(T &times; N&sup2;) time, where T is sequence length and N is the number of tags. With N=89 and T=256, that's 89&sup2; &times; 256 &asymp; 2.0 million operations per example. That's fast on a GPU.</p>
+  <p>If you went to, say, 500 tags, the N&sup2; cost would start to hurt. At 89 it's fine.</p>
 </div>
 
 <div class="q">Does the CRF actually learn meaningful transitions, or is it just a constraint layer?</div>
@@ -316,7 +316,7 @@
 <div class="a">
   <p>BIOES adds two more tag prefixes: E (End of entity) and S (Single-token entity). So "John Smith" would be <code>B-PERSON E-PERSON</code> instead of <code>B-PERSON I-PERSON</code>, and standalone "Paris" would be <code>S-LOCATION</code> instead of <code>B-LOCATION</code>.</p>
   <p>The argument for BIOES: it encodes entity boundaries more explicitly. The model doesn't have to figure out where an entity ends &mdash; the E tag tells it directly. In older BiLSTM-CRF papers, BIOES consistently outperformed BIO by about 0.3-0.8 F1.</p>
-  <p>The argument against: with 81 entity types, BIOES gives us <code>1 + (81 &times; 4) = 325</code> tags instead of 163. The CRF transition matrix becomes 325&times;325 = 105,625 parameters (4x larger), and the Viterbi decode is 4x slower. With modern transformers that already capture context well, the BIOES advantage is smaller than it was with BiLSTMs.</p>
+  <p>The argument against: with 44 entity types, BIOES gives us <code>1 + (44 &times; 4) = 177</code> tags instead of 89. The CRF transition matrix becomes 177&times;177 = 31,329 parameters (4x larger), and the Viterbi decode is 4x slower. With modern transformers that already capture context well, the BIOES advantage is smaller than it was with BiLSTMs.</p>
   <div class="callout">
     <strong>Our call:</strong> BIO with CRF is a solid middle ground. The CRF already enforces valid boundaries, which is the main thing BIOES provides. Going to BIOES would double label count and slow down training/inference for a gain that's likely under 0.5 F1 with a transformer backbone.
   </div>
@@ -325,7 +325,7 @@
   </div>
 </div>
 
-<div class="q">81 entity types seems like a lot. Are some too rare to learn well?</div>
+<div class="q">44 entity types seems like a lot. Are some too rare to learn well?</div>
 <div class="a">
   <p>Almost certainly yes. In the ai4privacy dataset, entity types follow a long-tail distribution. PERSON, EMAIL, and LOCATION might have tens of thousands of examples each. CRYPTO_WALLET, GENETIC_DATA, and TRADE_UNION might have a few hundred or even fewer.</p>
   <p>The model will struggle with rare types. If CRYPTO_WALLET appears only 200 times in 360K examples, the model has very few positive examples to learn from, while seeing millions of non-entity tokens.</p>
@@ -353,7 +353,7 @@
 <div class="q">Is the 50x ratio between head LR and backbone LR optimal?</div>
 <div class="a">
   <p>50x (1e-3 / 2e-5) is on the higher end of typical ratios. For standard NER with a softmax head, people usually use 5-10x (e.g., backbone 2e-5, head 1e-4 or 2e-4).</p>
-  <p>We use a higher ratio because the CRF head has more work to do than a simple softmax head. It needs to learn a 163&times;163 transition matrix from scratch, plus character CNN patterns, plus the gating mechanism. All of these are randomly initialized and need to move fast. At a lower head LR (say 1e-4), the CRF takes many more epochs to escape the "all-O" trap, which we saw in Run 1.</p>
+  <p>We use a higher ratio because the CRF head has more work to do than a simple softmax head. It needs to learn a 89&times;89 transition matrix from scratch, plus character CNN patterns, plus the gating mechanism. All of these are randomly initialized and need to move fast. At a lower head LR (say 1e-4), the CRF takes many more epochs to escape the "all-O" trap, which we saw in Run 1.</p>
   <div class="callout">
     <strong>What if 50x is too aggressive?</strong> If you see the head overfitting before the backbone has fully adapted (training loss drops to near-zero but validation loss plateaus), the head LR might be too high. For full training on 360K examples, you might want to try head LR of 5e-4 (25x ratio) and see if it generalizes better.
   </div>
@@ -488,7 +488,7 @@
   <p>The CRF's forward algorithm computes the "partition function" using log-sum-exp over all possible tag sequences. This involves:</p>
   <ol style="padding-left: 48px; margin: 12px 0;">
     <li style="margin-bottom: 8px;">Exponentiating emission scores (which can be large positive or negative numbers)</li>
-    <li style="margin-bottom: 8px;">Summing these exponentials across 163 tag options at each position</li>
+    <li style="margin-bottom: 8px;">Summing these exponentials across 89 tag options at each position</li>
     <li style="margin-bottom: 8px;">Taking the log of the sum</li>
     <li style="margin-bottom: 8px;">Repeating this for every position in the sequence (up to 256 times)</li>
   </ol>
@@ -586,7 +586,7 @@
     <li>DeBERTa gives you strong contextual understanding from pretraining</li>
     <li>CharCNN adds pattern recognition for structured entities that subword tokenization obscures</li>
     <li>Gating fusion lets the model dynamically choose which signal to trust per token</li>
-    <li>CRF enforces valid BIO sequences, which matters more with 81 entity types than with 4</li>
+    <li>CRF enforces valid BIO sequences, which matters more with 44 entity types than with 4</li>
   </ul>
   <p>The one thing to keep an eye on is whether the CharCNN + GatingFusion adds enough value to justify the added complexity. After full training, run an ablation: train the same model but without the CharCNN (set <code>char_ids=None</code> so the forward pass uses context features only). If the CharCNN model wins by 0.5+ F1 on structured PII types, keep it. If the gap is tiny, you could simplify to DeBERTa + CRF and save some complexity.</p>
   <div class="callout">

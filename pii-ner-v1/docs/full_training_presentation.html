@@ -124,7 +124,7 @@
     <h1>Full Training Pipeline</h1>
     <p class="subtitle">From smoke test to 360K examples: data engineering, debugging, and design decisions</p>
     <div style="margin-top: 44px; color: #475569; font-size: 1.05em;">
-      DeBERTa v3-xsmall &middot; CharCNN &middot; Gating Fusion &middot; CRF &nbsp;&middot;&nbsp; 71.1M parameters &nbsp;&middot;&nbsp; 163 BIO tags &nbsp;&middot;&nbsp; 3 datasets
+      DeBERTa v3-xsmall &middot; CharCNN &middot; Gating Fusion &middot; CRF &nbsp;&middot;&nbsp; 71.1M parameters &nbsp;&middot;&nbsp; 89 BIO tags &nbsp;&middot;&nbsp; 3 datasets
     </div>
     <div style="margin-top: 20px;">
       <span class="tag tag-green">Smoke test: PASSED (F1=0.992)</span>
@@ -145,7 +145,7 @@
       </div>
       <div class="flow-step">
         <h3 style="color: #60a5fa;"><span class="step-num">2</span> Label Normalization</h3>
-        <p style="font-size: 1em;">100+ source label names must map to 81 canonical entity types. "FIRSTNAME", "FIRST_NAME", "first_name", "PER" &rarr; all become PERSON.</p>
+        <p style="font-size: 1em;">100+ source label names must map to 44 canonical entity types. "FIRSTNAME", "FIRST_NAME", "first_name", "PER" &rarr; all become PERSON.</p>
       </div>
       <div class="flow-step">
         <h3 style="color: #60a5fa;"><span class="step-num">3</span> Optimizer Lifecycle</h3>
@@ -287,7 +287,7 @@ return _tokenize_and_align(tokens, bio_tags, tokenizer)</div>
 <!-- ===== Slide 6: Label Normalization ===== -->
 <div class="slide" id="s6">
   <div>
-    <h2>Label Normalization: 100+ Names &rarr; 81 Types</h2>
+    <h2>Label Normalization: 100+ Names &rarr; 44 Types</h2>
     <p style="margin-bottom: 20px;">Each dataset uses its own label vocabulary. We maintain per-dataset mapping dictionaries to a canonical set.</p>
     <div class="two-col">
       <div>
@@ -326,7 +326,7 @@ return _tokenize_and_align(tokens, bio_tags, tokenizer)</div>
 <div class="slide" id="s7">
   <div>
     <h2>The 4-Tier PII Taxonomy</h2>
-    <p style="margin-bottom: 20px;">81 entity types organized by sensitivity. Each tier has a different recall target &mdash; miss tolerance decreases with severity.</p>
+    <p style="margin-bottom: 20px;">44 entity types organized by sensitivity. Each tier has a different recall target &mdash; miss tolerance decreases with severity.</p>
     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
       <div class="flow-step" style="border-left: 4px solid #ef4444;">
         <h3 style="color: #ef4444;">Tier 1: Critical &mdash; Target &ge; 0.98 Recall</h3>
@@ -458,7 +458,7 @@ class PiiTrainer(Trainer):
 <div class="slide" id="s10">
   <div>
     <h2>Mixed Precision + CRF: A Delicate Balance</h2>
-    <p style="margin-bottom: 20px;">The CRF head computes log-sum-exp over 163&times;163 transition matrices. This is numerically unstable in half precision.</p>
+    <p style="margin-bottom: 20px;">The CRF head computes log-sum-exp over 89&times;89 transition matrices. This is numerically unstable in half precision.</p>
     <div class="two-col">
       <div>
         <h3>The Three-Layer Defense</h3>
@@ -489,7 +489,7 @@ class PiiTrainer(Trainer):
           <tr><td><span class="yellow">FP16</span></td><td>5 bits</td><td>10 bits</td><td>~6.5&times;10<sup>4</sup></td><td>Yes</td></tr>
         </table>
         <div class="callout callout-yellow" style="margin-top: 16px;">
-          <span class="yellow">FP16 CRF failure mode:</span> Transition scores for 163 labels easily exceed FP16 range (65504) in the log-sum-exp computation, producing <code>inf</code> &rarr; <code>NaN</code> loss.
+          <span class="yellow">FP16 CRF failure mode:</span> Transition scores for 89 labels can exceed FP16 range (65504) in the log-sum-exp computation, producing <code>inf</code> &rarr; <code>NaN</code> loss.
         </div>
         <h3 style="margin-top: 20px;">GPU Auto-Detection</h3>
         <div class="code-block" style="font-size: 0.82em; margin: 6px 0;">gpu_mem = torch.cuda.get_device_properties(0).total_memory
@@ -527,7 +527,7 @@ else:                     # T4, V100
       <div>
         <h3>Why These Choices</h3>
         <ul>
-          <li><strong>50x LR ratio:</strong> Validated in smoke test &mdash; DeBERTa representations must be preserved while CRF transitions (163&times;163 matrix) need aggressive learning</li>
+          <li><strong>50x LR ratio:</strong> Validated in smoke test &mdash; DeBERTa representations must be preserved while CRF transitions (89&times;89 matrix) need aggressive learning</li>
           <li><strong>10 epochs:</strong> With 360K examples and effective batch 32, each epoch is ~11,250 steps. 10 epochs = ~112K steps &mdash; well within the typical fine-tuning budget</li>
           <li><strong>256 seq len:</strong> Covers 95%+ of PII-containing text. Longer sequences have diminishing returns and quadratic attention cost</li>
           <li><strong>Linear schedule:</strong> Standard for NER fine-tuning. Cosine provides marginal benefit for <20 epoch runs</li>
@@ -694,7 +694,7 @@ _result = _trainer.train()  # 3 steps only</div>
       <tr>
         <td>Training data</td>
         <td>3-dataset mix</td>
-        <td>AI4Privacy: volume. Nemotron: synthetic diversity. Gretel: financial PII coverage. Combined: broadest coverage for 81 entity types.</td>
+        <td>AI4Privacy: volume. Nemotron: synthetic diversity. Gretel: financial PII coverage. Combined: broadest coverage for 44 entity types.</td>
         <td>Single dataset (gaps in coverage), 5+ datasets (diminishing returns, more label noise)</td>
       </tr>
     </table>
@@ -754,7 +754,7 @@ _result = _trainer.train()  # 3 steps only</div>
         </div>
         <div class="callout callout-blue">
           <strong style="color: #60a5fa;">Q: Why 50x LR ratio specifically?</strong><br>
-          Derived empirically from the smoke test. Standard NER fine-tuning uses 2e-5&ndash;5e-5 for the backbone. The CRF head starts from random initialization with a 163&times;163 transition matrix &mdash; it needs aggressive learning. 1e-3 is a standard "train from scratch" LR. The 50x ratio ensures the backbone is gently tuned while the head learns fast.
+          Derived empirically from the smoke test. Standard NER fine-tuning uses 2e-5&ndash;5e-5 for the backbone. The CRF head starts from random initialization with an 89&times;89 transition matrix &mdash; it needs aggressive learning. 1e-3 is a standard "train from scratch" LR. The 50x ratio ensures the backbone is gently tuned while the head learns fast.
         </div>
       </div>
       <div>
@@ -800,8 +800,8 @@ _result = _trainer.train()  # 3 steps only</div>
           Constrained decoding (e.g., masking invalid transitions at inference) prevents illegal sequences but doesn't learn transition preferences. The CRF learns that <code>B-PERSON &rarr; I-PERSON</code> is much more likely than <code>B-PERSON &rarr; I-EMAIL</code>. This soft constraint improves boundary detection even when emission scores are ambiguous.
         </div>
         <div class="callout callout-blue" style="margin-bottom: 16px;">
-          <strong style="color: #60a5fa;">Q: 163 BIO tags seems like a lot. Is the CRF transition matrix too large?</strong><br>
-          The transition matrix is 163&times;163 = 26,569 parameters. This is tiny compared to the model's 71M total. Many transitions are effectively zero (B-SSN &rarr; I-PERSON never happens), so the matrix is very sparse in practice. The Viterbi decode is O(T&times;K&sup2;) where T=seq_len, K=163 &mdash; still fast at ~2ms per sequence.
+          <strong style="color: #60a5fa;">Q: Is the CRF transition matrix large enough to matter?</strong><br>
+          The transition matrix is 89&times;89 = 7,921 parameters. This is tiny compared to the model's 71M total. Many transitions are effectively zero (B-SSN &rarr; I-PERSON never happens), so the matrix is very sparse in practice. The Viterbi decode is O(T&times;K&sup2;) where T=seq_len, K=89 &mdash; still fast at ~2ms per sequence.
         </div>
         <div class="callout callout-blue">
           <strong style="color: #60a5fa;">Q: What's the <code>prediction_step</code> override doing?</strong><br>
@@ -823,7 +823,7 @@ _result = _trainer.train()  # 3 steps only</div>
         <td><strong style="color: #60a5fa;">DataFog PII-NER v1</strong></td>
         <td>DeBERTa + CharCNN + CRF</td>
         <td>~2ms/seq (ONNX target)</td>
-        <td>81</td>
+        <td>44</td>
         <td>Full fine-tuning</td>
         <td>Open source, ONNX-exportable, tier-based recall targets</td>
       </tr>
@@ -861,7 +861,7 @@ _result = _trainer.train()  # 3 steps only</div>
       </tr>
     </table>
     <div class="callout callout-green" style="margin-top: 16px;">
-      <strong>Our differentiator:</strong> Widest open-source PII entity coverage (81 types), CRF-enforced boundary consistency, CharCNN for format pattern detection, and ONNX-exportable for sub-5ms inference. The combination of breadth + speed + open source doesn't exist yet.
+      <strong>Our differentiator:</strong> Widest open-source PII entity coverage (44 types), CRF-enforced boundary consistency, CharCNN for format pattern detection, and ONNX-exportable for sub-5ms inference. The combination of breadth + speed + open source doesn't exist yet.
     </div>
   </div>
 </div>

@@ -196,7 +196,7 @@
 - Runs in under 10 minutes on a T4 GPU</div>
   <div class="annotation" style="margin-top: 16px;">
     <strong>Why these numbers?</strong><br>
-    &bull; <code>Eval loss &lt; 10</code> &mdash; CRF loss is a negative log-likelihood over the <em>entire sequence</em>, not per-token cross-entropy. A loss of 0.8 means ~45% probability on the correct tag sequence out of 163<sup>seq_len</sup> paths. Values under 10 mean the model is confidently predicting the right sequences.<br><br>
+    &bull; <code>Eval loss &lt; 10</code> &mdash; CRF loss is a negative log-likelihood over the <em>entire sequence</em>, not per-token cross-entropy. A loss of 0.8 means ~45% probability on the correct tag sequence out of 89<sup>seq_len</sup> paths. Values under 10 mean the model is confidently predicting the right sequences.<br><br>
     &bull; <code>F1 &gt; 0.90</code> &mdash; Since we're evaluating on the <em>same</em> 100 training examples, this is an overfit test. If the model can't memorize 100 examples, the wiring is broken. 0.90 (not 1.0) accounts for rare entity types that may only appear once in 100 examples.<br><br>
     &bull; <code>Under 10 minutes</code> &mdash; Practical constraint. A T4 has 16GB VRAM. If the model can't train in 10 min on 100 examples, something is wrong with batch sizes or memory.
   </div>
@@ -254,7 +254,7 @@ from datafog_pii_ner.data.label_schema import NUM_LABELS, ID_TO_LABEL
 
 config = PiiNerConfig(
     backbone="microsoft/deberta-v3-xsmall",
-    num_labels=NUM_LABELS,       # 163
+    num_labels=NUM_LABELS,       # 89
 )</div>
   <div class="annotation">
     <strong>Only 2 params are set explicitly.</strong> Everything else uses defaults from <code>PiiNerConfig.__init__</code>. Let's look at what those defaults are and what they control:
@@ -262,7 +262,7 @@ config = PiiNerConfig(
   <table style="margin-top: 12px;">
     <tr><th>Parameter</th><th>Value</th><th>What It Controls</th></tr>
     <tr><td><code class="highlight">backbone</code></td><td><code>"microsoft/deberta-v3-xsmall"</code></td><td>Which pretrained transformer to load</td></tr>
-    <tr><td><code class="highlight">num_labels</code></td><td><code>163</code></td><td>BIO tag count: O + (B + I) &times; 81 entity types</td></tr>
+    <tr><td><code class="highlight">num_labels</code></td><td><code>89</code></td><td>BIO tag count: O + (B + I) &times; 44 entity types</td></tr>
     <tr><td><code class="dim">char_vocab_size</code></td><td><code>256</code></td><td>ASCII byte range for character embedding</td></tr>
     <tr><td><code class="dim">char_embed_dim</code></td><td><code>50</code></td><td>Dimensionality of each character vector</td></tr>
     <tr><td><code class="dim">char_cnn_filters</code></td><td><code>(50, 50, 50)</code></td><td>Number of output channels per conv filter</td></tr>
@@ -274,11 +274,11 @@ config = PiiNerConfig(
 
 <!-- Slide 7: num_labels deep dive -->
 <div class="slide" id="slide-7">
-  <h2>Where Does 163 Come From?</h2>
+  <h2>Where Does 89 Come From?</h2>
   <p class="subtitle">label_schema.py builds the BIO label set</p>
   <div class="two-col">
     <div class="col">
-      <h3>81 Entity Types in 4 Tiers</h3>
+      <h3>44 Entity Types in 4 Tiers</h3>
       <table style="font-size: 0.85em;">
         <tr><th>Tier</th><th>Examples</th><th>Count</th></tr>
         <tr><td class="red">Tier 1: Critical</td><td>SSN, CREDIT_CARD, PASSPORT</td><td>6</td></tr>
@@ -287,7 +287,6 @@ config = PiiNerConfig(
         <tr><td class="dim">Tier 4: Domain</td><td>PASSWORD, IBAN, SALARY</td><td>20</td></tr>
         <tr style="border-top: 2px solid #334155;"><td colspan="2"><strong>Total entity types</strong></td><td><strong>44</strong></td></tr>
       </table>
-      <p style="margin-top: 12px; font-size: 0.9em; color: #94a3b8;">(The schema defines 81 types total across all tiers. The 44 shown here are the most common.)</p>
     </div>
     <div class="col">
       <h3>BIO Expansion</h3>
@@ -296,7 +295,7 @@ for etype in ALL_ENTITY_TYPES:
     labels.append(f"B-{etype}")  # Begin
     labels.append(f"I-{etype}")  # Inside</div>
       <p style="margin-top: 12px; font-size: 0.95em;">
-        <code>1 + (81 &times; 2) = <span class="highlight">163</span></code>
+        <code>1 + (44 &times; 2) = <span class="highlight">89</span></code>
       </p>
       <p style="margin-top: 12px; font-size: 0.9em; color: #94a3b8;">
         Every entity type gets two tags:<br>
@@ -340,9 +339,9 @@ for etype in ALL_ENTITY_TYPES:
   <div class="arch-box">
     <div>
       <div class="label">4. <span class="highlight">self.crf_head</span></div>
-      <div class="detail">CRFHead(hidden_dim=384, num_labels=163)</div>
+      <div class="detail">CRFHead(hidden_dim=384, num_labels=89)</div>
     </div>
-    <div class="detail">~89K params &middot; <span class="orange">random init</span></div>
+    <div class="detail">~42K params &middot; <span class="orange">random init</span></div>
   </div>
   <div class="annotation" style="margin-top: 14px;">
     <strong>Key asymmetry:</strong> DeBERTa is <span class="green">pretrained</span> (already understands language). Everything else is <span class="orange">randomly initialized</span> (knows nothing about PII). This is why differential learning rates are essential.
@@ -524,21 +523,21 @@ context_dim = self.deberta.config.hidden_size   # 384</div>
   <h2>Component 4: CRF Head</h2>
   <div class="code-block">self.crf_head = CRFHead(
     hidden_dim=384,      # Must match DeBERTa / fusion output
-    num_labels=163,      # BIO tag count
+    num_labels=89,       # BIO tag count
     dropout=0.1,
 )</div>
   <p style="margin: 14px 0;">Inside the CRF head, two sub-components:</p>
   <div class="flow-step">
-    <strong><code>self.classifier = nn.Linear(384, 163)</code></strong><br>
-    <span style="color: #94a3b8;">Projects each token's 384-dim fused representation to 163 "emission scores" &mdash; one per possible BIO tag. These are unnormalized logits: how much each token "looks like" each tag, independently.</span>
+    <strong><code>self.classifier = nn.Linear(384, 89)</code></strong><br>
+    <span style="color: #94a3b8;">Projects each token's 384-dim fused representation to 89 "emission scores" &mdash; one per possible BIO tag. These are unnormalized logits: how much each token "looks like" each tag, independently.</span>
   </div>
   <div class="flow-arrow">&darr;</div>
   <div class="flow-step">
-    <strong><code>self.crf = TorchCRF(163, batch_first=True)</code></strong><br>
-    <span style="color: #94a3b8;">A Conditional Random Field layer with a <strong>163 &times; 163 transition matrix</strong>. This matrix learns: "given that the previous token was tagged X, how likely is it that the current token is tagged Y?" This enforces legal BIO sequences.</span>
+    <strong><code>self.crf = TorchCRF(89, batch_first=True)</code></strong><br>
+    <span style="color: #94a3b8;">A Conditional Random Field layer with an <strong>89 &times; 89 transition matrix</strong>. This matrix learns: "given that the previous token was tagged X, how likely is it that the current token is tagged Y?" This enforces legal BIO sequences.</span>
   </div>
   <div class="annotation" style="margin-top: 14px;">
-    <strong>The transition matrix is the heart of the CRF.</strong> It has 163 &times; 163 = 26,569 learnable parameters. Each cell [i][j] represents the score for transitioning from tag i to tag j. After training, <code>transitions[B-PERSON][I-PERSON]</code> will be high, but <code>transitions[B-PERSON][I-EMAIL]</code> will be strongly negative.
+    <strong>The transition matrix is the heart of the CRF.</strong> It has 89 &times; 89 = 7,921 learnable parameters. Each cell [i][j] represents the score for transitioning from tag i to tag j. After training, <code>transitions[B-PERSON][I-PERSON]</code> will be high, but <code>transitions[B-PERSON][I-EMAIL]</code> will be strongly negative.
   </div>
 </div>
 
@@ -613,7 +612,7 @@ for i, tags in enumerate(tag_sequences):
   <div class="flow-arrow">&darr;</div>
   <div class="flow-step">
     <strong>5. CRF head: emit + decode</strong><br>
-    <span class="tensor-shape">fused (batch, seq_len, 384)</span> &rarr; Linear &rarr; <span class="tensor-shape">emissions (batch, seq_len, 163)</span> &rarr; CRF &rarr; <span class="tensor-shape">predictions (batch, seq_len)</span>
+    <span class="tensor-shape">fused (batch, seq_len, 384)</span> &rarr; Linear &rarr; <span class="tensor-shape">emissions (batch, seq_len, 89)</span> &rarr; CRF &rarr; <span class="tensor-shape">predictions (batch, seq_len)</span>
   </div>
 </div>
 
@@ -769,7 +768,7 @@ optimizer = AdamW([
       <h3>Why 50x Ratio?</h3>
       <p style="font-size: 0.9em;">
         <strong>Backbone (2e-5):</strong> Already has useful language representations. Large updates destroy them. This is a standard fine-tuning LR for DeBERTa.<br><br>
-        <strong>Head (1e-3):</strong> Random weights that need to learn 163 &times; 163 transition probabilities + character patterns from scratch. Needs to move fast to escape the "predict all O" local minimum.
+        <strong>Head (1e-3):</strong> Random weights that need to learn 89 &times; 89 transition probabilities + character patterns from scratch. Needs to move fast to escape the "predict all O" local minimum.
       </p>
       <p style="margin-top: 10px; font-size: 0.85em; color: #94a3b8;">
         1e-3 / 2e-5 = <strong>50x</strong>. The head learns 50 times faster than the backbone.
