@@ -34,6 +34,12 @@ class CRFHead(nn.Module):
         """
         emissions = self.classifier(self.dropout(hidden_states))
 
+        # Clamp emissions for numerical stability.
+        # The CRF log-sum-exp forward algorithm can produce NaN gradients
+        # when emission values are extreme. Clamping to [-100, 100] is safe
+        # because the CRF only uses relative differences between scores.
+        emissions = torch.clamp(emissions, min=-100, max=100)
+
         # Convert attention mask to boolean for CRF
         mask = attention_mask.bool() if attention_mask is not None else None
 
