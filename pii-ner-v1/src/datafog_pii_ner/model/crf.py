@@ -21,7 +21,8 @@ class CRFHead(nn.Module):
         self.num_labels = num_labels
         # label_weights: (num_labels,) tensor mapping label_id -> sequence weight.
         # Set via set_label_weights(). None means uniform weighting.
-        self.label_weights: torch.Tensor | None = None
+        # Use register_buffer so set_label_weights can update it later.
+        self.register_buffer("label_weights", None)
 
     def set_label_weights(self, weights: torch.Tensor):
         """Set per-label weights for tier-weighted sequence loss.
