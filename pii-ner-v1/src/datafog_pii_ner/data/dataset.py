@@ -17,7 +17,7 @@ from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset
 from transformers import PreTrainedTokenizerFast
 
 from .char_vocab import text_to_char_ids
-from .label_schema import LABEL_TO_ID, map_label
+from .label_schema import LABEL_TO_ID, TIER_1, TIER_2, map_label
 
 logger = logging.getLogger(__name__)
 
@@ -333,6 +333,62 @@ def load_single_dataset(
     return processed
 
 
+def _build_oversample_label_ids(tiers: list[int]) -> set[int]:
+    """Build set of label IDs that belong to the specified tiers."""
+    tier_types = []
+    if 1 in tiers:
+        tier_types.extend(TIER_1)
+    if 2 in tiers:
+        tier_types.extend(TIER_2)
+
+    label_ids = set()
+    for etype in tier_types:
+        b_key = f"B-{etype}"
+        i_key = f"I-{etype}"
+        if b_key in LABEL_TO_ID:
+            label_ids.add(LABEL_TO_ID[b_key])
+        if i_key in LABEL_TO_ID:
+            label_ids.add(LABEL_TO_ID[i_key])
+    return label_ids
+
+
+def _oversample_rare_entities(
+    dataset: Dataset,
+    oversample_tiers: list[int],
+    oversample_factor: int,
+) -> Dataset:
+    """Oversample examples containing rare entity types.
+
+    Identifies examples that contain entities from the specified tiers,
+    then duplicates them `oversample_factor` times.
+    """
+    target_label_ids = _build_oversample_label_ids(oversample_tiers)
+    if not target_label_ids:
+        return dataset
+
+    # Find indices of examples containing target entities
+    rare_indices = []
+    for i in range(len(dataset)):
+        labels = dataset[i]["labels"]
+        if any(label_id in target_label_ids for label_id in labels):
+            rare_indices.append(i)
+
+    if not rare_indices:
+        logger.warning("No examples found containing target tier entities for oversampling")
+        return dataset
+
+    logger.info(
+        f"Oversampling: {len(rare_indices)} examples with tier {oversample_tiers} entities "
+        f"x{oversample_factor} ({len(rare_indices) * oversample_factor} additional examples)"
+    )
+
+    # Create duplicated dataset
+    oversampled_indices = rare_indices * oversample_factor
+    oversampled = dataset.select(oversampled_indices)
+
+    return concatenate_datasets([dataset, oversampled])
+
+
 def load_pii_datasets(
     tokenizer: PreTrainedTokenizerFast,
     max_seq_len: int = 256,
@@ -341,8 +397,16 @@ def load_pii_datasets(
     val_ratio: float = 0.1,
     test_ratio: float = 0.1,
     seed: int = 42,
+    oversample_tiers: list[int] | None = None,
+    oversample_factor: int = 2,
 ) -> DatasetDict:
-    """Load all PII datasets, combine, and split into train/val/test."""
+    """Load all PII datasets, combine, and split into train/val/test.
+
+    Args:
+        oversample_tiers: List of tier numbers to oversample (e.g., [1, 2]).
+            None disables oversampling.
+        oversample_factor: Number of times to duplicate rare-entity examples.
+    """
     all_datasets = []
     for name in DATASET_CONFIGS:
         try:
@@ -361,16 +425,23 @@ def load_pii_datasets(
     combined = concatenate_datasets(all_datasets)
     logger.info(f"Combined: {len(combined)} examples")
 
-    # Split: train / val / test
+    # Split: train / val / test (BEFORE oversampling to avoid data leakage)
     test_size = test_ratio
     val_size = val_ratio / (1 - test_ratio)  # Adjust for two-stage split
 
     split1 = combined.train_test_split(test_size=test_size, seed=seed)
     split2 = split1["train"].train_test_split(test_size=val_size, seed=seed)
 
+    train_ds = split2["train"]
+
+    # Oversample rare entities in training set only
+    if oversample_tiers:
+        train_ds = _oversample_rare_entities(train_ds, oversample_tiers, oversample_factor)
+        logger.info(f"Train after oversampling: {len(train_ds)} examples")
+
     return DatasetDict(
         {
-            "train": split2["train"],
+            "train": train_ds,
             "validation": split2["test"],
             "test": split1["test"],
         }

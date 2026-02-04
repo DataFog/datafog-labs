@@ -91,6 +91,30 @@ LABEL_TO_ID = {label: i for i, label in enumerate(BIO_LABELS)}
 ID_TO_LABEL = {i: label for i, label in enumerate(BIO_LABELS)}
 NUM_LABELS = len(BIO_LABELS)
 
+# Default tier weights for loss scaling.
+# Sequences containing higher-tier entities get proportionally higher loss.
+DEFAULT_TIER_WEIGHTS = {1: 3.0, 2: 2.0, 3: 1.5, 4: 1.0}
+
+
+def build_label_weights(tier_weights: dict[int, float] | None = None) -> list[float]:
+    """Build per-label weight vector from tier weights.
+
+    Returns a list of length NUM_LABELS where each label ID maps to a weight.
+    O tag gets weight 1.0. Entity tags get their tier's weight.
+    """
+    if tier_weights is None:
+        tier_weights = DEFAULT_TIER_WEIGHTS
+
+    weights = [1.0] * NUM_LABELS  # O tag = 1.0
+    for etype in ALL_ENTITY_TYPES:
+        tier = TIER_MAP[etype]
+        w = tier_weights.get(tier, 1.0)
+        b_id = LABEL_TO_ID[f"B-{etype}"]
+        i_id = LABEL_TO_ID[f"I-{etype}"]
+        weights[b_id] = w
+        weights[i_id] = w
+    return weights
+
 # --- Dataset-specific label mappings ---
 # Maps each source dataset's entity type names to our canonical names.
 

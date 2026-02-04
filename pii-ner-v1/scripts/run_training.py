@@ -37,7 +37,7 @@ sys.path.insert(0, str(SRC_DIR))
 
 from datafog_pii_ner.data.collator import PiiDataCollator
 from datafog_pii_ner.data.dataset import load_pii_datasets
-from datafog_pii_ner.data.label_schema import NUM_LABELS
+from datafog_pii_ner.data.label_schema import NUM_LABELS, build_label_weights
 from datafog_pii_ner.model.pii_model import PiiNerConfig, PiiNerModel
 from datafog_pii_ner.training.metrics import compute_metrics
 from datafog_pii_ner.training.train import PiiTrainer
@@ -241,13 +241,16 @@ def train(config: dict, precision: dict, logger: logging.Logger, status: StatusT
     # --- Data ---
     logger.info("Loading datasets (may take a few minutes on first run)...")
     status.update(stage="loading_data")
+    data_cfg = config["data"]
     datasets = load_pii_datasets(
         tokenizer=tokenizer,
-        max_seq_len=config["data"]["max_seq_len"],
+        max_seq_len=data_cfg["max_seq_len"],
         max_char_len=config["model"]["max_char_len"],
-        val_ratio=config["data"]["val_ratio"],
-        test_ratio=config["data"]["test_ratio"],
-        seed=config["data"].get("seed", 42),
+        val_ratio=data_cfg["val_ratio"],
+        test_ratio=data_cfg["test_ratio"],
+        seed=data_cfg.get("seed", 42),
+        oversample_tiers=data_cfg.get("oversample_tiers"),
+        oversample_factor=data_cfg.get("oversample_factor", 2),
     )
     logger.info(f"Train: {len(datasets['train']):,}  Val: {len(datasets['validation']):,}  "
                 f"Test: {len(datasets['test']):,}")
@@ -271,6 +274,17 @@ def train(config: dict, precision: dict, logger: logging.Logger, status: StatusT
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"Parameters: {param_count:,} total, {trainable:,} trainable")
 
+    # --- Tier-weighted loss ---
+    tier_weights_cfg = config.get("training", {}).get("tier_weights")
+    if tier_weights_cfg:
+        # Convert string keys from YAML to ints
+        tw = {int(k): float(v) for k, v in tier_weights_cfg.items()}
+        weights = build_label_weights(tw)
+        model.crf_head.set_label_weights(torch.tensor(weights, dtype=torch.float32))
+        logger.info(f"Tier-weighted CRF loss: {tw}")
+    else:
+        logger.info("CRF loss: uniform (no tier weighting)")
+
     # --- Collator ---
     collator = PiiDataCollator(tokenizer=tokenizer, max_char_len=config["model"]["max_char_len"])
 
@@ -285,6 +299,13 @@ def train(config: dict, precision: dict, logger: logging.Logger, status: StatusT
     wandb_cfg = config.get("wandb", {})
     report_to = "wandb" if wandb_cfg.get("enabled", False) else "none"
 
+    # Warmup: prefer warmup_steps over warmup_ratio (ratio is deprecated in HF 5.2+)
+    warmup_kwargs = {}
+    if "warmup_steps" in tcfg:
+        warmup_kwargs["warmup_steps"] = tcfg["warmup_steps"]
+    elif "warmup_ratio" in tcfg:
+        warmup_kwargs["warmup_ratio"] = tcfg["warmup_ratio"]
+
     training_args = TrainingArguments(
         output_dir=output_dir,
         num_train_epochs=tcfg["epochs"],
@@ -292,7 +313,8 @@ def train(config: dict, precision: dict, logger: logging.Logger, status: StatusT
         per_device_eval_batch_size=tcfg["batch_size"],
         gradient_accumulation_steps=tcfg.get("gradient_accumulation_steps", 1),
         learning_rate=tcfg["lr_backbone"],
-        warmup_ratio=tcfg.get("warmup_ratio", 0.1),
+        lr_scheduler_type=tcfg.get("lr_scheduler_type", "linear"),
+        **warmup_kwargs,
         weight_decay=tcfg.get("weight_decay", 0.01),
         fp16=precision["fp16"],
         bf16=precision["bf16"],

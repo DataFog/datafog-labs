@@ -8,6 +8,9 @@ class CRFHead(nn.Module):
 
     Linear projection to label space followed by a CRF layer that enforces
     valid BIO tag sequences during both training (loss) and inference (decoding).
+
+    Supports tier-weighted loss: sequences containing higher-tier (more critical)
+    entity types receive proportionally higher loss weight.
     """
 
     def __init__(self, hidden_dim: int, num_labels: int, dropout: float = 0.1):
@@ -16,6 +19,18 @@ class CRFHead(nn.Module):
         self.crf = TorchCRF(num_labels, batch_first=True)
         self.dropout = nn.Dropout(dropout)
         self.num_labels = num_labels
+        # label_weights: (num_labels,) tensor mapping label_id -> sequence weight.
+        # Set via set_label_weights(). None means uniform weighting.
+        self.label_weights: torch.Tensor | None = None
+
+    def set_label_weights(self, weights: torch.Tensor):
+        """Set per-label weights for tier-weighted sequence loss.
+
+        Args:
+            weights: (num_labels,) tensor. Each sequence's loss is scaled by
+                the max weight across all labels present in that sequence.
+        """
+        self.register_buffer("label_weights", weights)
 
     def forward(
         self,
@@ -49,9 +64,26 @@ class CRFHead(nn.Module):
             # CRF expects labels without ignore_index padding.
             # Replace -100 (HF ignore index) with 0 — masked positions are excluded by mask.
             clamped_labels = labels.clamp(min=0)
-            # CRF returns log-likelihood; negate for loss.
-            log_likelihood = self.crf(emissions, clamped_labels, mask=mask, reduction="mean")
-            result["loss"] = -log_likelihood
+
+            if self.label_weights is not None:
+                # Tier-weighted sequence loss:
+                # 1. Get per-sequence log-likelihoods
+                # 2. Weight each sequence by the max label weight it contains
+                # 3. Take weighted mean
+                log_likelihood = self.crf(emissions, clamped_labels, mask=mask, reduction="none")
+                # Gather weight for every label position: (batch, seq_len)
+                per_token_weights = self.label_weights[clamped_labels]
+                # Zero out padding positions
+                if mask is not None:
+                    per_token_weights = per_token_weights * mask.float()
+                # Sequence weight = max weight across all tokens
+                seq_weights, _ = per_token_weights.max(dim=1)  # (batch,)
+                # Weighted mean of negative log-likelihoods
+                result["loss"] = -(log_likelihood * seq_weights).sum() / seq_weights.sum()
+            else:
+                # Standard uniform loss
+                log_likelihood = self.crf(emissions, clamped_labels, mask=mask, reduction="mean")
+                result["loss"] = -log_likelihood
 
         # Always decode for predictions
         tag_sequences = self.crf.decode(emissions, mask=mask)
