@@ -1,0 +1,35 @@
+model:
+  backbone: microsoft/deberta-v3-xsmall
+  char_embed_dim: 50
+  char_vocab_size: 256
+  char_cnn_filters: [50, 50, 50]
+  char_cnn_widths: [3, 4, 5]
+  max_char_len: 20
+  dropout: 0.1
+
+data:
+  max_seq_len: 256
+  val_ratio: 0.1
+  test_ratio: 0.1
+  seed: 42
+
+training:
+  epochs: 10
+  batch_size: 8
+  gradient_accumulation_steps: 4  # effective batch = 32
+  lr_backbone: 2.0e-5
+  lr_head: 1.0e-3
+  warmup_ratio: 0.1
+  weight_decay: 0.01
+  eval_strategy: epoch
+  save_strategy: epoch
+  metric_for_best_model: overall_f1
+  logging_steps: 50
+  dataloader_num_workers: 4
+  save_total_limit: 3
+  output_dir: output
+  run_name: pii-ner-v1-rtx3090
+
+wandb:
+  enabled: true
+  project: datafog-pii-ner

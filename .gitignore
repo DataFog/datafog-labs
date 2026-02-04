@@ -28,6 +28,7 @@ Thumbs.db
 *.onnx
 *.safetensors
 wandb/
+output/
 outputs/
 checkpoints/
 runs/
