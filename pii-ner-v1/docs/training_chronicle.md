@@ -216,6 +216,84 @@ Supports HuggingFace Hub loading, character-level offsets, BIO→span decoding, 
 
 ---
 
+## Phase 6: V1.1 Training Results
+
+**Commit:** `0c854d5`
+**Trained on:** A100 (Colab), BF16, 15 epochs, effective batch 32
+
+### Training Curve
+
+| Epoch | Train Loss | Val Loss | F1 | Tier 1 Recall | Notes |
+|-------|-----------|---------|------|--------------|-------|
+| 1 | 4.26 | 4.13 | 0.876 | 0.759 | Strong start |
+| 2 | 3.03 | 3.23 | 0.891 | 0.796 | Steady improvement |
+| 3 | 2.68 | 2.93 | 0.900 | 0.776 | Near peak |
+| 4 | 2.68 | 2.88 | **0.899** | **0.806** | **Best checkpoint** |
+| 5 | **8.40** | 7.90 | 0.841 | 0.749 | **Train loss spike — backbone destabilized** |
+| 6 | 6.80 | 7.42 | 0.827 | 0.735 | Partial recovery |
+| 7 | 6.48 | 6.34 | 0.851 | 0.747 | Still below peak |
+
+Best model restored from epoch 4 via `load_best_model_at_end=True`.
+
+### V1.1 vs V1 Comparison (Best Checkpoints)
+
+| Metric | V1.1 (Ep 4) | V1 (Ep 5) | Change |
+|--------|------------|-----------|--------|
+| Overall F1 | 0.899 | 0.903 | -0.004 |
+| Tier 1 Recall | **0.806** | 0.722 | **+0.084** |
+| Tier 2 Recall | 0.940 | 0.934 | +0.006 |
+| Tier 3 Recall | 0.929 | 0.919 | +0.010 |
+| Tier 4 Recall | 0.870 | 0.866 | +0.004 |
+
+### What We Learned
+
+**The tier-weighted loss and oversampling worked for their intended purpose.** Tier 1 recall improved +8.4 points. Standout entities at epoch 4: SSN recall 0.949, Credit Card 0.883, Drivers License 0.961. Passport number (0.426) remained the main drag — only 526 training examples, and 3x oversampling can only do so much.
+
+**The backbone destabilization pattern recurred, earlier and worse.** V1 spiked at epoch 6 (train loss 2.96→5.81). V1.1 spiked at epoch 5 (train loss 2.68→8.40). The tier-weighted loss (3x weight) + oversampling (3x duplication) = ~9x effective gradient signal for Tier 1 sequences hitting the backbone. We reduced backbone LR by 2x (2e-5→1e-5) but amplified gradients by ~9x. Net effect: worse instability, one epoch earlier.
+
+**The cosine schedule didn't prevent the spike.** By epoch 5 the backbone LR had only decayed to ~0.65 of its initial value (cosine at 5/15 of total). The recovery in epochs 6-7 was partial at best — once the backbone representations are disrupted, they don't fully recover within the same run.
+
+---
+
+## Phase 7: V1.2 — Backbone Freezing Schedule
+
+**Hypothesis:** The backbone (DeBERTa-v3-xsmall) adapts well for ~4 epochs, then continued updates under amplified tier-weighted gradients cause catastrophic destabilization. Freezing the backbone after epoch 4 lets the head components (CharCNN, GatingFusion, CRF) continue learning without risking backbone collapse.
+
+**Prior art:**
+- ULMFiT (Howard & Ruder, 2018): gradual unfreezing for transfer learning
+- LP-FT (Kumar et al., 2022): fine-tuning can distort pretrained features
+
+### Changes from V1.1
+
+| Parameter | V1.1 | V1.2 | Rationale |
+|-----------|------|------|-----------|
+| Backbone freeze | Never | After epoch 4 | Prevent destabilization |
+| Total epochs | 15 | 10 | 4 full + 6 head-only |
+| All other params | — | Identical | Isolate the freeze variable |
+
+### Implementation
+
+A `FreezeBackboneCallback` (HF `TrainerCallback`) fires at the end of epoch 4 and sets `requires_grad=False` on all parameters with `"deberta"` in the name. ~10 lines of code. The optimizer still holds backbone params but computes zero gradients, so no updates occur. Head components continue with the cosine-decaying LR.
+
+### Expected Outcome
+
+If the hypothesis is correct:
+- Epochs 1-4 should match v1.1 exactly (same hyperparameters)
+- Epochs 5-10 should maintain or improve upon epoch 4 quality (no spike)
+- Overall F1 ≥ 0.899 with Tier 1 recall ≥ 0.806
+
+If the hypothesis is wrong and the spike comes from head components (not backbone drift), we'd still see destabilization after epoch 4. This would point toward gradient clipping or lower tier weights as the next intervention.
+
+### Notebooks
+
+Versioned experiment notebooks:
+- `notebooks/smoke_test.ipynb` — Phase 1: overfit validation
+- `notebooks/full_training.ipynb` — Phase 3-6: v1 and v1.1 full training
+- `notebooks/v1.2_freeze_backbone.ipynb` — Phase 7: backbone freezing experiment
+- `scripts/train_v1.2_local.py` — Local RTX 3090 runner for v1.2
+
+---
+
 ## Commit Log Summary
 
 | Phase | Commits | Key Outcome |
@@ -226,16 +304,22 @@ Supports HuggingFace Hub loading, character-level offsets, BIO→span decoding, 
 | Precision Strategy | 3 | Auto-select BF16→FP32 fallback |
 | V1 Full Training | 1 | F1=0.904 on 360K examples, model on HuggingFace |
 | V1.1 Improvements | 3 | Tier-weighted loss, oversampling, inference pipeline |
-| **Total** | **32** | |
+| V1.1 Training | 1 | Tier 1 recall +8.4pts but backbone spike at epoch 5 |
+| V1.2 Setup | 1+ | Backbone freezing notebook + local training script |
+| **Total** | **34+** | |
 
 ---
 
-## Open Questions for V1.1+
+## Open Questions
 
-1. **Will tier-weighted loss + oversampling close the Tier 1 gap?** The 323x imbalance is severe. Oversampling helps but doesn't create genuinely new examples. If Tier 1 recall stays below 0.90, we may need synthetic data augmentation.
+1. **Will backbone freezing eliminate the training spike?** V1.2 is the direct test. If it works, the model achieves v1.1 epoch 4 quality without regression.
 
-2. **16 zero-occurrence entity types** — NATIONALITY, ETHNICITY, RELIGION, MARITAL_STATUS, MEDICAL_RECORD, STUDENT_ID, DEVICE_ID, CRYPTO_WALLET, INSURANCE_NUMBER, SALARY, CRIMINAL_RECORD, POLITICAL_AFFILIATION, SEXUAL_ORIENTATION, HEALTH_CONDITION, GENETIC_DATA, TRADE_UNION. These can't be learned without new data sources. Should we drop them from the taxonomy or find additional datasets?
+2. **Can head-only training improve beyond epoch 4?** With 6 epochs of head-only training, CharCNN and CRF may learn better entity patterns using the frozen backbone representations as stable features.
 
-3. **ONNX export** — The CRF Viterbi decode doesn't export cleanly from pytorch-crf. May need a pure-PyTorch reimplementation (~50 lines) for the ONNX path.
+3. **Passport number recall (0.426)** — Only 526 training examples. Even with 3x oversampling and 3x tier weight, this may require synthetic data generation to approach the 0.98 target.
 
-4. **Backbone scaling** — DeBERTa-v3-xsmall (22M) was chosen for latency. If we need more capacity for Tier 1, DeBERTa-v3-small (44M) or DeBERTa-v3-base (86M) are the next steps, with corresponding latency trade-offs.
+4. **16 zero-occurrence entity types** — NATIONALITY, ETHNICITY, RELIGION, MARITAL_STATUS, MEDICAL_RECORD, STUDENT_ID, DEVICE_ID, CRYPTO_WALLET, INSURANCE_NUMBER, SALARY, CRIMINAL_RECORD, POLITICAL_AFFILIATION, SEXUAL_ORIENTATION, HEALTH_CONDITION, GENETIC_DATA, TRADE_UNION. These can't be learned without new data sources.
+
+5. **ONNX export** — The CRF Viterbi decode doesn't export cleanly from pytorch-crf. May need a pure-PyTorch reimplementation (~50 lines) for the ONNX path.
+
+6. **Backbone scaling** — DeBERTa-v3-xsmall (22M) was chosen for latency. If we need more capacity for Tier 1, DeBERTa-v3-small (44M) or DeBERTa-v3-base (86M) are the next steps.
