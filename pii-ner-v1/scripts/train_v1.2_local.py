@@ -170,7 +170,7 @@ def main():
         save_strategy="epoch",
         metric_for_best_model="overall_f1",
         load_best_model_at_end=True,
-        report_to="wandb",
+        report_to="none",  # wandb not authenticated locally; use tensorboard or add WANDB_API_KEY
         run_name=CONFIG["run_name"],
         logging_steps=50,
         remove_unused_columns=False,

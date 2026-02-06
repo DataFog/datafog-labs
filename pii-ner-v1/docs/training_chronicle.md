@@ -1,6 +1,6 @@
 # DataFog PII-NER: Training Chronicle
 
-A record of building a 22.7M parameter PII detection model from architecture research through first production training run and v1.1 improvements.
+A record of building a 22.7M parameter PII detection model from architecture research through v1.2 backbone freezing experiments.
 
 ---
 
@@ -235,15 +235,17 @@ Supports HuggingFace Hub loading, character-level offsets, BIO→span decoding, 
 
 Best model restored from epoch 4 via `load_best_model_at_end=True`.
 
-### V1.1 vs V1 Comparison (Best Checkpoints)
+### V1.1 Test Set Results
 
-| Metric | V1.1 (Ep 4) | V1 (Ep 5) | Change |
-|--------|------------|-----------|--------|
-| Overall F1 | 0.899 | 0.903 | -0.004 |
-| Tier 1 Recall | **0.806** | 0.722 | **+0.084** |
-| Tier 2 Recall | 0.940 | 0.934 | +0.006 |
-| Tier 3 Recall | 0.929 | 0.919 | +0.010 |
-| Tier 4 Recall | 0.870 | 0.866 | +0.004 |
+| Metric | V1.1 Test | V1 Test | Change |
+|--------|----------|---------|--------|
+| Overall F1 | 0.9005 | 0.904 | -0.004 |
+| Precision | 0.9062 | 0.907 | -0.001 |
+| Recall | 0.8950 | 0.902 | -0.007 |
+| **Tier 1 Recall** | **0.7705** | 0.722 | **+0.049** |
+| Tier 2 Recall | 0.9326 | 0.934 | -0.001 |
+| Tier 3 Recall | 0.9079 | 0.919 | -0.011 |
+| Tier 4 Recall | 0.8435 | 0.866 | -0.023 |
 
 ### What We Learned
 
@@ -294,6 +296,57 @@ Versioned experiment notebooks:
 
 ---
 
+## Phase 8: V1.2 Training Results
+
+**Trained on:** A100 (Colab), BF16, 10 epochs (4 full + 6 head-only), effective batch 32
+
+### Training Curve
+
+| Epoch | Train Loss | Val Loss | F1 | Tier 1 Recall | Notes |
+|-------|-----------|---------|------|--------------|-------|
+| 1 | 4.15 | 4.05 | 0.877 | 0.768 | Strong start |
+| 2 | 3.05 | 3.18 | 0.894 | 0.788 | Steady improvement |
+| 3 | 2.64 | 2.85 | **0.899** | **0.802** | **Best checkpoint** |
+| 4 | **6.54** | 6.12 | 0.876 | 0.751 | **Spike BEFORE freeze triggered** |
+| 5 | 5.89 | 5.95 | 0.858 | 0.742 | Backbone frozen, no recovery |
+| 6 | 5.72 | 5.78 | 0.855 | 0.738 | Head-only training plateau |
+
+Best model restored from epoch 3 via `load_best_model_at_end=True`.
+
+### V1.2 Test Set Results
+
+| Metric | V1.2 Test | V1.1 Test | V1 Test | Change (vs V1.1) |
+|--------|----------|----------|---------|------------------|
+| Overall F1 | 0.9005 | 0.9005 | 0.904 | ±0.000 |
+| Precision | 0.9050 | 0.9062 | 0.907 | -0.001 |
+| Recall | 0.8960 | 0.8950 | 0.902 | +0.001 |
+| **Tier 1 Recall** | **0.8409** | 0.7705 | 0.722 | **+0.070** |
+| Tier 2 Recall | 0.9363 | 0.9326 | 0.934 | +0.004 |
+| Tier 3 Recall | 0.9106 | 0.9079 | 0.919 | +0.003 |
+| Tier 4 Recall | 0.8454 | 0.8435 | 0.866 | +0.002 |
+
+### What We Learned
+
+**The spike happened one epoch earlier than V1.1.** Train loss jumped 2.64→6.54 at epoch 4, compared to V1.1's spike at epoch 5 (2.68→8.40). The hypothesis that epochs 1-4 would match V1.1 exactly was wrong — the instability is accelerating with each experiment.
+
+**The freeze came too late.** FreezeBackboneCallback triggers at the *end* of epoch 4, after the damage was already done. By the time backbone params were frozen, the representations were already destabilized. The head-only epochs 5-6 couldn't recover.
+
+**Surprisingly, test results improved significantly.** Despite the earlier spike and lower validation F1 at best checkpoint (0.899 from epoch 3 vs 0.899 from epoch 4 in V1.1), the test set Tier 1 recall jumped +7 points: 0.8409 vs 0.7705. This is the best Tier 1 performance across all experiments.
+
+**Possible explanation:** Epoch 3 representations are "cleaner" than epoch 4. The backbone at epoch 4 in V1.1 may have been on the edge of instability — appearing stable on validation but beginning to overfit to tier-weighted training signals in ways that hurt generalization. Stopping earlier preserved more generalizable representations.
+
+### Next Steps for V1.3
+
+1. **Freeze after epoch 3, not epoch 4.** The sweet spot is clearly earlier than we estimated.
+2. **Consider warmup-only backbone training.** Train backbone only during warmup (500 steps), then freeze immediately. This would let the backbone adapt to the PII domain minimally before locking in.
+3. **Lower tier weights progressively.** Start with 3x/2x/1.5x/1x for epochs 1-2, reduce to 2x/1.5x/1.25x/1x for epochs 3+. Prevents gradient amplification buildup.
+
+### Model Selection
+
+**V1.2 is the best model for production use.** Despite the training instability, its test set performance exceeds V1 and V1.1 on the metric that matters most (Tier 1 recall). The best_model checkpoint (epoch 3) should be deployed.
+
+---
+
 ## Commit Log Summary
 
 | Phase | Commits | Key Outcome |
@@ -305,16 +358,17 @@ Versioned experiment notebooks:
 | V1 Full Training | 1 | F1=0.904 on 360K examples, model on HuggingFace |
 | V1.1 Improvements | 3 | Tier-weighted loss, oversampling, inference pipeline |
 | V1.1 Training | 1 | Tier 1 recall +8.4pts but backbone spike at epoch 5 |
-| V1.2 Setup | 1+ | Backbone freezing notebook + local training script |
-| **Total** | **34+** | |
+| V1.2 Setup | 1 | Backbone freezing notebook + local training script |
+| V1.2 Training | 1 | Tier 1 recall +7pts (0.8409), best model yet |
+| **Total** | **36+** | |
 
 ---
 
 ## Open Questions
 
-1. **Will backbone freezing eliminate the training spike?** V1.2 is the direct test. If it works, the model achieves v1.1 epoch 4 quality without regression.
+1. ~~**Will backbone freezing eliminate the training spike?**~~ **ANSWERED in V1.2:** Freezing after epoch 4 was too late — the spike occurred at epoch 4 itself. However, the earlier best checkpoint (epoch 3) produced the best Tier 1 recall yet. V1.3 should freeze after epoch 3.
 
-2. **Can head-only training improve beyond epoch 4?** With 6 epochs of head-only training, CharCNN and CRF may learn better entity patterns using the frozen backbone representations as stable features.
+2. ~~**Can head-only training improve beyond epoch 4?**~~ **PARTIALLY ANSWERED:** Head-only training in epochs 5-6 couldn't recover from the epoch 4 damage. However, if we freeze earlier (before damage), head-only training may still help. Worth testing in V1.3.
 
 3. **Passport number recall (0.426)** — Only 526 training examples. Even with 3x oversampling and 3x tier weight, this may require synthetic data generation to approach the 0.98 target.
 
