@@ -11,6 +11,43 @@ from seqeval.metrics import (
 from ..data.label_schema import ID_TO_LABEL, TIER_MAP
 
 
+def compute_metrics_from_labels(true_labels: list[list[str]], pred_labels: list[list[str]]) -> dict:
+    """Compute entity-level metrics from BIO tag sequences.
+
+    Args:
+        true_labels: List of true BIO tag sequences.
+        pred_labels: List of predicted BIO tag sequences.
+
+    Returns:
+        Dict of metrics for logging/reporting.
+    """
+    results = {
+        "overall_f1": f1_score(true_labels, pred_labels),
+        "overall_precision": precision_score(true_labels, pred_labels),
+        "overall_recall": recall_score(true_labels, pred_labels),
+    }
+
+    report = classification_report(true_labels, pred_labels, output_dict=True)
+    for entity_type, metrics in report.items():
+        if isinstance(metrics, dict) and entity_type not in ("micro avg", "macro avg", "weighted avg"):
+            safe_name = entity_type.replace("-", "_").lower()
+            results[f"type_{safe_name}_f1"] = metrics["f1-score"]
+            results[f"type_{safe_name}_recall"] = metrics["recall"]
+
+    tier_recalls = {1: [], 2: [], 3: [], 4: []}
+    for entity_type, metrics in report.items():
+        if isinstance(metrics, dict) and entity_type not in ("micro avg", "macro avg", "weighted avg"):
+            tier = TIER_MAP.get(entity_type)
+            if tier is not None:
+                tier_recalls[tier].append(metrics["recall"])
+
+    for tier, recalls in tier_recalls.items():
+        if recalls:
+            results[f"tier_{tier}_recall"] = np.mean(recalls)
+
+    return results
+
+
 def compute_metrics(eval_pred) -> dict:
     """Compute entity-level metrics from HF Trainer predictions.
 
@@ -43,31 +80,4 @@ def compute_metrics(eval_pred) -> dict:
         true_labels.append(true_sent)
         pred_labels.append(pred_sent)
 
-    # Overall metrics
-    results = {
-        "overall_f1": f1_score(true_labels, pred_labels),
-        "overall_precision": precision_score(true_labels, pred_labels),
-        "overall_recall": recall_score(true_labels, pred_labels),
-    }
-
-    # Per-type metrics from classification report
-    report = classification_report(true_labels, pred_labels, output_dict=True)
-    for entity_type, metrics in report.items():
-        if isinstance(metrics, dict) and entity_type not in ("micro avg", "macro avg", "weighted avg"):
-            safe_name = entity_type.replace("-", "_").lower()
-            results[f"type_{safe_name}_f1"] = metrics["f1-score"]
-            results[f"type_{safe_name}_recall"] = metrics["recall"]
-
-    # Tier-level recall aggregation
-    tier_recalls = {1: [], 2: [], 3: [], 4: []}
-    for entity_type, metrics in report.items():
-        if isinstance(metrics, dict) and entity_type not in ("micro avg", "macro avg", "weighted avg"):
-            tier = TIER_MAP.get(entity_type)
-            if tier is not None:
-                tier_recalls[tier].append(metrics["recall"])
-
-    for tier, recalls in tier_recalls.items():
-        if recalls:
-            results[f"tier_{tier}_recall"] = np.mean(recalls)
-
-    return results
+    return compute_metrics_from_labels(true_labels, pred_labels)

@@ -304,3 +304,27 @@ def map_label(source_label: str, dataset_name: str) -> str | None:
         or label_map.get(normalized.upper())
         or label_map.get(normalized.lower())
     )
+
+
+def map_label_any(source_label: str) -> str | None:
+    """Map a label from any known source to a canonical label.
+
+    Useful for evaluation adapters that emit non-canonical label names.
+    """
+    normalized = source_label.strip()
+    if normalized.startswith(("B-", "I-")):
+        normalized = normalized[2:]
+
+    if normalized in ALL_ENTITY_TYPES:
+        return normalized
+
+    for label_map in (AI4PRIVACY_LABEL_MAP, NEMOTRON_LABEL_MAP, GRETEL_LABEL_MAP):
+        mapped = (
+            label_map.get(normalized)
+            or label_map.get(normalized.upper())
+            or label_map.get(normalized.lower())
+        )
+        if mapped:
+            return mapped
+
+    return None
