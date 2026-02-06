@@ -347,6 +347,69 @@ Best model restored from epoch 3 via `load_best_model_at_end=True`.
 
 ---
 
+## Phase 9: V1.3 — Early Freeze + Progressive Tier Weights
+
+**Hypothesis:** Two interventions based on V1.2 learnings:
+
+1. **Freeze backbone after epoch 3, not 4.** V1.2 showed the best checkpoint at epoch 3 and the destabilization spike at epoch 4 — *before* the freeze could trigger. By freezing one epoch earlier, we protect the backbone while its representations are still clean.
+
+2. **Progressive tier weight reduction.** The tier-weighted loss (3x for Tier 1) combined with oversampling (3x duplication) creates ~9x gradient amplification for critical PII sequences. This amplification accelerates learning early but accumulates damage over epochs. Reducing weights after epoch 2 limits the cumulative impact while still giving the model a strong initial signal.
+
+### Changes from V1.2
+
+| Parameter | V1.2 | V1.3 | Rationale |
+|-----------|------|------|-----------|
+| Backbone freeze | After epoch 4 | After epoch 3 | Spike occurred at epoch 4 in V1.2 |
+| Tier weights (epochs 1-2) | 3x/2x/1.5x/1x | 3x/2x/1.5x/1x | Same strong initial signal |
+| Tier weights (epochs 3+) | 3x/2x/1.5x/1x | 2x/1.5x/1.25x/1x | Reduce gradient amplification |
+| Total epochs | 10 | 10 | 3 full + 7 head-only |
+| All other params | — | Identical | Isolate the two new variables |
+
+### Implementation
+
+Two new `TrainerCallback` classes:
+
+1. **`FreezeBackboneCallback`** — Same as V1.2 but triggers at epoch 3 end. Sets `requires_grad=False` on all DeBERTa parameters.
+
+2. **`ProgressiveTierWeightCallback`** (new) — At the end of epoch 2, calls `model.crf_head.set_label_weights()` with the reduced weight vector. The CRF head's `label_weights` buffer updates in-place, immediately affecting loss computation for all subsequent batches.
+
+### Training Plan
+
+| Epoch | Backbone | Tier Weights | What's Happening |
+|-------|----------|-------------|------------------|
+| 1 | Training | 3x/2x/1.5x/1x | Full model, strong tier signal |
+| 2 | Training | 3x/2x/1.5x/1x | Full model, strong tier signal |
+| 2→3 | Training | **→ 2x/1.5x/1.25x/1x** | Tier weights reduced |
+| 3 | Training | 2x/1.5x/1.25x/1x | Full model, reduced signal |
+| 3→4 | **→ Frozen** | 2x/1.5x/1.25x/1x | Backbone frozen |
+| 4-10 | Frozen | 2x/1.5x/1.25x/1x | Head-only training |
+
+### Expected Outcome
+
+If both hypotheses are correct:
+- Epochs 1-3 should match V1.2 (same until freeze point)
+- No spike at epoch 4 (backbone is frozen before it happens)
+- Head-only epochs 4-10 should maintain or improve quality
+- Tier 1 recall ≥ 0.84 with potential for higher if head-only training adds value
+
+### Environment & Setup
+
+**GPU:** NVIDIA H100 PCIe (80GB VRAM, compute capability 9.0) on Lambda.ai
+**Precision:** BF16 (confirmed via preflight, loss decreasing 1176.9 → 1151.6)
+**Data:** 169,449 examples combined (AI4Privacy 43,501 + Nemotron 100K + Gretel 25,948), with Tier 1 oversampling 3x
+**Effective batch size:** 32 (8 per device × 4 gradient accumulation)
+**Total training steps:** 61,180
+**WandB:** Tracking at `datafog/huggingface` project
+
+### Training Status
+
+**Run started:** 2026-02-06 03:55 UTC
+**Status:** IN PROGRESS — training step ~20/61,180 at time of commit
+
+Results will be added to this chronicle when the run completes.
+
+---
+
 ## Commit Log Summary
 
 | Phase | Commits | Key Outcome |
@@ -360,20 +423,23 @@ Best model restored from epoch 3 via `load_best_model_at_end=True`.
 | V1.1 Training | 1 | Tier 1 recall +8.4pts but backbone spike at epoch 5 |
 | V1.2 Setup | 1 | Backbone freezing notebook + local training script |
 | V1.2 Training | 1 | Tier 1 recall +7pts (0.8409), best model yet |
-| **Total** | **36+** | |
+| V1.3 Setup | 1 | Early freeze + progressive tier weights |
+| **Total** | **37+** | |
 
 ---
 
 ## Open Questions
 
-1. ~~**Will backbone freezing eliminate the training spike?**~~ **ANSWERED in V1.2:** Freezing after epoch 4 was too late — the spike occurred at epoch 4 itself. However, the earlier best checkpoint (epoch 3) produced the best Tier 1 recall yet. V1.3 should freeze after epoch 3.
+1. ~~**Will backbone freezing eliminate the training spike?**~~ **ANSWERED in V1.2:** Freezing after epoch 4 was too late — the spike occurred at epoch 4 itself. However, the earlier best checkpoint (epoch 3) produced the best Tier 1 recall yet. V1.3 freezes after epoch 3.
 
-2. ~~**Can head-only training improve beyond epoch 4?**~~ **PARTIALLY ANSWERED:** Head-only training in epochs 5-6 couldn't recover from the epoch 4 damage. However, if we freeze earlier (before damage), head-only training may still help. Worth testing in V1.3.
+2. ~~**Can head-only training improve beyond epoch 4?**~~ **PARTIALLY ANSWERED:** Head-only training in epochs 5-6 couldn't recover from the epoch 4 damage. V1.3 tests whether freezing *before* the damage allows head-only training to add value.
 
-3. **Passport number recall (0.426)** — Only 526 training examples. Even with 3x oversampling and 3x tier weight, this may require synthetic data generation to approach the 0.98 target.
+3. **Does progressive tier weight reduction prevent the backbone spike?** V1.3 tests this — reducing from 3x to 2x after epoch 2 should lower cumulative gradient amplification by ~33% during the critical epoch 3 window.
 
-4. **16 zero-occurrence entity types** — NATIONALITY, ETHNICITY, RELIGION, MARITAL_STATUS, MEDICAL_RECORD, STUDENT_ID, DEVICE_ID, CRYPTO_WALLET, INSURANCE_NUMBER, SALARY, CRIMINAL_RECORD, POLITICAL_AFFILIATION, SEXUAL_ORIENTATION, HEALTH_CONDITION, GENETIC_DATA, TRADE_UNION. These can't be learned without new data sources.
+4. **Passport number recall (0.426)** — Only 526 training examples. Even with 3x oversampling and 3x tier weight, this may require synthetic data generation to approach the 0.98 target.
 
-5. **ONNX export** — The CRF Viterbi decode doesn't export cleanly from pytorch-crf. May need a pure-PyTorch reimplementation (~50 lines) for the ONNX path.
+5. **16 zero-occurrence entity types** — NATIONALITY, ETHNICITY, RELIGION, MARITAL_STATUS, MEDICAL_RECORD, STUDENT_ID, DEVICE_ID, CRYPTO_WALLET, INSURANCE_NUMBER, SALARY, CRIMINAL_RECORD, POLITICAL_AFFILIATION, SEXUAL_ORIENTATION, HEALTH_CONDITION, GENETIC_DATA, TRADE_UNION. These can't be learned without new data sources.
 
-6. **Backbone scaling** — DeBERTa-v3-xsmall (22M) was chosen for latency. If we need more capacity for Tier 1, DeBERTa-v3-small (44M) or DeBERTa-v3-base (86M) are the next steps.
+6. **ONNX export** — The CRF Viterbi decode doesn't export cleanly from pytorch-crf. May need a pure-PyTorch reimplementation (~50 lines) for the ONNX path.
+
+7. **Backbone scaling** — DeBERTa-v3-xsmall (22M) was chosen for latency. If we need more capacity for Tier 1, DeBERTa-v3-small (44M) or DeBERTa-v3-base (86M) are the next steps.

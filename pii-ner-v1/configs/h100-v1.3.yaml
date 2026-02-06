@@ -1,0 +1,57 @@
+model:
+  backbone: microsoft/deberta-v3-xsmall
+  char_embed_dim: 50
+  char_vocab_size: 256
+  char_cnn_filters: [50, 50, 50]
+  char_cnn_widths: [3, 4, 5]
+  max_char_len: 20
+  dropout: 0.1
+
+data:
+  max_seq_len: 256
+  val_ratio: 0.1
+  test_ratio: 0.1
+  seed: 42
+  # Oversample examples containing Tier 1 entities (SSN, Credit Card, etc.)
+  oversample_tiers: [1]
+  oversample_factor: 3
+
+training:
+  epochs: 10                          # 3 full + 7 head-only
+  batch_size: 8
+  gradient_accumulation_steps: 4      # effective batch = 32
+  lr_backbone: 1.0e-5                 # halved from v1 (2e-5) to prevent late-epoch regression
+  lr_head: 1.0e-3
+  lr_scheduler_type: cosine           # smoother decay than linear
+  warmup_steps: 500                   # ~1 epoch warmup
+  weight_decay: 0.01
+  eval_strategy: epoch
+  save_strategy: epoch
+  metric_for_best_model: overall_f1
+  logging_steps: 50
+  dataloader_num_workers: 4
+  save_total_limit: 3
+  output_dir: runs/2026-02-06_v1.3
+  run_name: pii-ner-v1.3-h100-2026-02-06
+
+  # v1.3: freeze backbone after epoch 3 (v1.2 used epoch 4, but spike hit at epoch 4)
+  freeze_backbone_after_epoch: 3
+
+  # Tier-weighted CRF loss — initial weights (epochs 1-2)
+  tier_weights:
+    1: 3.0    # SSN, Credit Card, Bank Account, Passport, DL, Tax ID
+    2: 2.0    # Person, Email, Phone, DOB, Address, IP
+    3: 1.5    # Username, Date, Location, Org, URL, etc.
+    4: 1.0    # Domain-specific types
+
+  # v1.3: progressive tier weight reduction after epoch 2
+  # Reduces gradient amplification buildup that caused backbone destabilization
+  tier_weights_after_epoch_2:
+    1: 2.0
+    2: 1.5
+    3: 1.25
+    4: 1.0
+
+wandb:
+  enabled: true
+  project: datafog-pii-ner
