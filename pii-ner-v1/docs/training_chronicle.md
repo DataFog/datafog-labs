@@ -401,12 +401,85 @@ If both hypotheses are correct:
 **Total training steps:** 61,180
 **WandB:** Tracking at `datafog/huggingface` project
 
-### Training Status
+### Training Curve
 
-**Run started:** 2026-02-06 03:55 UTC
-**Status:** IN PROGRESS — training step ~20/61,180 at time of commit
+**Trained on:** H100 PCIe (Lambda.ai), BF16, 10 epochs (3 full + 7 head-only), effective batch 32
+**Total time:** 20.0 hours
 
-Results will be added to this chronicle when the run completes.
+| Epoch | Val Loss | F1 | Tier 1 Recall | Notes |
+|-------|----------|------|--------------|-------|
+| 1 | 3.85 | 0.883 | 0.723 | Full model, full tier weights |
+| 2 | 2.90 | 0.899 | 0.759 | Full model, full tier weights |
+| — | — | — | — | *Tier weights reduced: 3x→2x, 2x→1.5x, 1.5x→1.25x* |
+| **3** | **2.71** | **0.908** | **0.825** | **Best checkpoint** |
+| — | — | — | — | *Backbone frozen* |
+| 4 | 3.91 | 0.902 | 0.807 | First head-only epoch |
+| 5 | 8.35 | 0.808 | 0.766 | **Spike — head components destabilized** |
+| 6 | 8.08 | 0.855 | 0.739 | Partial recovery |
+| 7 | 8.60 | 0.865 | 0.810 | Recovery continues |
+| 8 | 6.16 | 0.878 | 0.791 | Recovering |
+| 9 | 5.99 | 0.886 | 0.811 | Near-plateau |
+| 10 | 5.92 | 0.888 | 0.820 | Plateau |
+
+Best model restored from epoch 3 via `load_best_model_at_end=True`.
+
+### V1.3 Test Set Results
+
+| Metric | V1.3 Test | V1.2 Test | V1.1 Test | V1 Test | Change (vs V1.2) |
+|--------|----------|----------|----------|---------|------------------|
+| **Overall F1** | **0.9071** | 0.9005 | 0.9005 | 0.904 | **+0.007** |
+| Precision | 0.8981 | 0.9050 | 0.9062 | 0.907 | -0.007 |
+| **Recall** | **0.9162** | 0.8960 | 0.8950 | 0.902 | **+0.020** |
+| Tier 1 Recall | 0.8226 | **0.8409** | 0.7705 | 0.722 | -0.018 |
+| **Tier 2 Recall** | **0.9452** | 0.9363 | 0.9326 | 0.934 | **+0.009** |
+| **Tier 3 Recall** | **0.9304** | 0.9106 | 0.9079 | 0.919 | **+0.020** |
+| **Tier 4 Recall** | **0.8681** | 0.8454 | 0.8435 | 0.866 | **+0.023** |
+
+### Per-Entity F1 (Top 20)
+
+| Entity | F1 |
+|--------|------|
+| URL | 0.9938 |
+| Biometric | 0.9924 |
+| IP Address | 0.9883 |
+| Date of Birth | 0.9812 |
+| Vehicle ID | 0.9755 |
+| Email | 0.9680 |
+| Phone | 0.9661 |
+| License Plate | 0.9520 |
+| Gender | 0.9462 |
+| Employee ID | 0.9400 |
+| IBAN | 0.9346 |
+| Username | 0.9303 |
+| SSN | 0.9296 |
+| Location | 0.9285 |
+| Account Number | 0.9234 |
+| Organization | 0.9024 |
+| Drivers License | 0.8805 |
+| Password | 0.8800 |
+| Date | 0.8766 |
+| Person | 0.8746 |
+
+### What We Learned
+
+**V1.3 achieved the best overall F1 (0.9071) and recall (0.9162) across all experiments.** The progressive tier weight reduction improved generalization — Tier 2, 3, and 4 all set new highs. The tradeoff: Tier 1 recall dipped slightly (0.8226 vs V1.2's 0.8409) because the reduced tier weights (2x instead of 3x from epoch 3 onward) gave less emphasis to critical PII.
+
+**The spike is NOT a backbone problem — it's a head problem.** The epoch 5 spike (val loss 3.91→8.35) occurred *after* the backbone was frozen at epoch 3. This definitively rules out backbone destabilization as the root cause. The CharCNN, GatingFusion, or CRF components themselves are becoming unstable under continued training. This is a major finding that reframes the problem.
+
+**Head-only recovery is real but slow.** After the epoch 5 spike, the head gradually recovered over epochs 6-10 (F1: 0.808→0.888). Given enough epochs, head-only training does recover, but never reaches the epoch 3 peak. This suggests the CRF's transition parameters or the gating fusion weights enter a bad region and slowly escape.
+
+**Epoch 3 remains the sweet spot.** Across V1.2 and V1.3, epoch 3 consistently produces the best checkpoint. The model learns rapidly in epochs 1-3, then some component (previously attributed to the backbone, now known to be the head) destabilizes.
+
+### Model Selection
+
+**V1.3 is the best model for balanced performance** — highest F1 (0.9071), best recall (0.9162), strongest Tiers 2-4. **V1.2 remains better for Tier 1-critical deployments** (Tier 1 recall 0.8409 vs 0.8226). The choice depends on whether overall accuracy or critical PII detection is the priority.
+
+### Next Steps for V1.4
+
+1. **Investigate the head spike.** Now that we know the backbone isn't the cause, profile which head component destabilizes. Add gradient norm logging per component (CharCNN, GatingFusion, CRF separately).
+2. **Gradient clipping for head components.** The spike may be caused by large CRF gradients from tier-weighted loss. Try `max_grad_norm=1.0` specifically for head parameters.
+3. **Early stopping at epoch 3.** Given that epoch 3 is consistently best, simply training for 3 epochs may be optimal. Eliminates the spike entirely.
+4. **Combine V1.2 tier weights with V1.3 freeze timing.** Use the original 3x weights (no reduction) but freeze after epoch 3. This might recover V1.2's Tier 1 recall while benefiting from the earlier freeze.
 
 ---
 
@@ -424,17 +497,18 @@ Results will be added to this chronicle when the run completes.
 | V1.2 Setup | 1 | Backbone freezing notebook + local training script |
 | V1.2 Training | 1 | Tier 1 recall +7pts (0.8409), best model yet |
 | V1.3 Setup | 1 | Early freeze + progressive tier weights |
-| **Total** | **37+** | |
+| V1.3 Training | 1 | Best F1 (0.9071), spike is head not backbone |
+| **Total** | **38+** | |
 
 ---
 
 ## Open Questions
 
-1. ~~**Will backbone freezing eliminate the training spike?**~~ **ANSWERED in V1.2:** Freezing after epoch 4 was too late — the spike occurred at epoch 4 itself. However, the earlier best checkpoint (epoch 3) produced the best Tier 1 recall yet. V1.3 freezes after epoch 3.
+1. ~~**Will backbone freezing eliminate the training spike?**~~ **ANSWERED in V1.3:** No. The spike occurred at epoch 5 even with the backbone frozen after epoch 3. The instability originates in the head components (CharCNN, GatingFusion, or CRF), not the backbone.
 
-2. ~~**Can head-only training improve beyond epoch 4?**~~ **PARTIALLY ANSWERED:** Head-only training in epochs 5-6 couldn't recover from the epoch 4 damage. V1.3 tests whether freezing *before* the damage allows head-only training to add value.
+2. ~~**Can head-only training improve beyond the spike?**~~ **ANSWERED in V1.3:** Yes, slowly. After the epoch 5 spike, head-only training recovered from F1=0.808 to 0.888 over 5 epochs. But it never reached the epoch 3 peak (0.908).
 
-3. **Does progressive tier weight reduction prevent the backbone spike?** V1.3 tests this — reducing from 3x to 2x after epoch 2 should lower cumulative gradient amplification by ~33% during the critical epoch 3 window.
+3. ~~**Does progressive tier weight reduction prevent the backbone spike?**~~ **ANSWERED in V1.3:** The tier weight reduction improved epoch 3 quality (F1 0.908 vs V1.2's 0.899) but did not prevent the spike. The spike is a head component issue, not a gradient amplification issue on the backbone.
 
 4. **Passport number recall (0.426)** — Only 526 training examples. Even with 3x oversampling and 3x tier weight, this may require synthetic data generation to approach the 0.98 target.
 
