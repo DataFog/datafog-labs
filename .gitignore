@@ -29,9 +29,13 @@ Thumbs.db
 *.safetensors
 wandb/
 output/
+output-*/
 outputs/
 checkpoints/
 runs/
+
+# Windows artifacts
+nul
 
 # Data (downloaded datasets)
 data/raw/
