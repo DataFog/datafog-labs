@@ -278,6 +278,56 @@ GRETEL_LABEL_MAP = {
 }
 
 
+GRETEL_V1_LABEL_MAP = {
+    "medical_record_number": "MEDICAL_RECORD",
+    "device_identifier": "DEVICE_ID",
+    "health_plan_beneficiary_number": "INSURANCE_NUMBER",
+    "name": "PERSON",
+    "first_name": "PERSON",
+    "last_name": "PERSON",
+    "email": "EMAIL",
+    "phone_number": "PHONE",
+    "ssn": "SSN",
+    "credit_card_number": "CREDIT_CARD",
+    "date_of_birth": "DATE_OF_BIRTH",
+    "date": "DATE",
+    "street_address": "STREET_ADDRESS",
+    "address": "STREET_ADDRESS",
+    "city": "LOCATION",
+    "state": "LOCATION",
+    "country": "LOCATION",
+    "ip_address": "IP_ADDRESS",
+    "username": "USERNAME",
+    "url": "URL",
+    "company_name": "ORGANIZATION",
+    "organization": "ORGANIZATION",
+    "passport_number": "PASSPORT_NUMBER",
+    "drivers_license": "DRIVERS_LICENSE",
+    "bank_account_number": "BANK_ACCOUNT",
+    "iban": "IBAN",
+    "swift_bic": "SWIFT_CODE",
+    "license_plate": "LICENSE_PLATE",
+    "password": "PASSWORD",
+    "pin": "PIN",
+    "employee_id": "EMPLOYEE_ID",
+    "account_number": "ACCOUNT_NUMBER",
+    "tax_id": "TAX_ID",
+    "gender": "GENDER",
+    "age": "AGE",
+}
+
+NCBI_LABEL_MAP = {
+    "Disease": "HEALTH_CONDITION",
+}
+
+MACCROBAT_LABEL_MAP = {
+    "DISEASE_DISORDER": "HEALTH_CONDITION",
+    "SIGN_SYMPTOM": "HEALTH_CONDITION",
+}
+
+SYNTHETIC_LABEL_MAP = {etype: etype for etype in ALL_ENTITY_TYPES}
+
+
 def map_label(source_label: str, dataset_name: str) -> str | None:
     """Map a dataset-specific label to our canonical label.
 
@@ -287,6 +337,10 @@ def map_label(source_label: str, dataset_name: str) -> str | None:
         "ai4privacy": AI4PRIVACY_LABEL_MAP,
         "nemotron": NEMOTRON_LABEL_MAP,
         "gretel": GRETEL_LABEL_MAP,
+        "gretel_v1": GRETEL_V1_LABEL_MAP,
+        "ncbi": NCBI_LABEL_MAP,
+        "maccrobat": MACCROBAT_LABEL_MAP,
+        "synthetic": SYNTHETIC_LABEL_MAP,
     }
 
     label_map = label_maps.get(dataset_name)
@@ -314,7 +368,15 @@ def map_label_any(source_label: str) -> str | None:
     if normalized in ALL_ENTITY_TYPES:
         return normalized
 
-    for label_map in (AI4PRIVACY_LABEL_MAP, NEMOTRON_LABEL_MAP, GRETEL_LABEL_MAP):
+    for label_map in (
+        AI4PRIVACY_LABEL_MAP,
+        NEMOTRON_LABEL_MAP,
+        GRETEL_LABEL_MAP,
+        GRETEL_V1_LABEL_MAP,
+        NCBI_LABEL_MAP,
+        MACCROBAT_LABEL_MAP,
+        SYNTHETIC_LABEL_MAP,
+    ):
         mapped = (
             label_map.get(normalized)
             or label_map.get(normalized.upper())

@@ -1,17 +1,19 @@
 """Dataset loading and preprocessing for PII NER training.
 
-Loads AI4Privacy, Nemotron-PII, and Gretel datasets from HuggingFace,
-maps labels to canonical schema, tokenizes with DeBERTa tokenizer,
-and generates character IDs for the CharCNN.
+Loads AI4Privacy, Nemotron-PII, Gretel, NCBI Disease, MACCROBAT,
+and synthetic datasets. Maps labels to canonical schema, tokenizes
+with DeBERTa tokenizer, and generates character IDs for the CharCNN.
 
-Supports two data formats:
-- Token-based: pre-tokenized tokens + NER tags (AI4Privacy)
+Supports three data formats:
+- Token-based: pre-tokenized tokens + NER tags (AI4Privacy, NCBI, MACCROBAT)
 - Span-based: raw text + character-offset spans (Nemotron, Gretel)
+- Entity-based: raw text + entity values/types without offsets (Gretel v1)
 """
 
 import ast
 import logging
 import re
+from pathlib import Path
 
 from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset
 from transformers import PreTrainedTokenizerFast
@@ -20,6 +22,9 @@ from .char_vocab import text_to_char_ids
 from .label_schema import LABEL_TO_ID, TIER_1, TIER_2, map_label
 
 logger = logging.getLogger(__name__)
+
+# Path to synthetic data directory (relative to this file's package root)
+_SYNTHETIC_DATA_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data" / "synthetic"
 
 # HuggingFace dataset identifiers
 DATASET_CONFIGS = {
@@ -45,10 +50,98 @@ DATASET_CONFIGS = {
         "language_col": "language",
         "language_value": "English",
     },
+    "gretel_v1": {
+        "path": "gretelai/gretel-pii-masking-en-v1",
+        "split": "train",
+        "format": "entity",
+        "text_col": "text",
+        "entities_col": "entities",
+    },
+    "ncbi": {
+        "path": "ncbi/ncbi_disease",
+        "splits": {"train": "train", "validation": "validation", "test": "test"},
+        "format": "token",
+        "tag_names": ["O", "B-Disease", "I-Disease"],
+    },
+    "maccrobat": {
+        "path": "singh-aditya/MACCROBAT_biomedical_ner",
+        "split": "train",
+        "format": "token",
+    },
+    "synthetic": {
+        "path": str(_SYNTHETIC_DATA_DIR),
+        "split": "train",
+        "format": "synthetic",
+    },
 }
 
 # Regex for whitespace-aware word tokenization preserving character offsets
 _WORD_RE = re.compile(r"\S+")
+
+
+def _entities_to_spans(
+    text: str,
+    entities: list[dict] | str,
+) -> list[dict]:
+    """Convert entity-value format (type + value, no offsets) to character-offset spans.
+
+    For datasets like Gretel v1 that provide entity values and types but not
+    character offsets. Finds each entity's position in the text.
+
+    Args:
+        text: The raw document text.
+        entities: List of dicts with 'value' and 'type' keys, or string repr.
+
+    Returns:
+        List of {"start": int, "end": int, "label": str} dicts.
+    """
+    try:
+        if isinstance(entities, str):
+            entities = ast.literal_eval(entities)
+    except (ValueError, SyntaxError):
+        return []
+
+    if not isinstance(entities, list):
+        return []
+
+    # Collect (value, type) pairs, sort by value length descending so
+    # longer matches take priority
+    entity_list = []
+    for ent in entities:
+        if not isinstance(ent, dict):
+            continue
+        value = ent.get("value", "")
+        etype = ent.get("type", ent.get("entity_type", ent.get("label", "")))
+        if value and etype:
+            entity_list.append((str(value), str(etype)))
+    entity_list.sort(key=lambda x: len(x[0]), reverse=True)
+
+    # Track which character positions are already claimed
+    claimed = set()
+    spans = []
+
+    for value, etype in entity_list:
+        # Try exact match first
+        idx = text.find(value)
+        if idx == -1:
+            # Case-insensitive fallback
+            pattern = re.escape(value)
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                idx = match.start()
+            else:
+                continue
+
+        start, end = idx, idx + len(value)
+
+        # Skip if any character position overlaps with an already-claimed span
+        if any(pos in claimed for pos in range(start, end)):
+            continue
+
+        claimed.update(range(start, end))
+        spans.append({"start": start, "end": end, "label": etype})
+
+    return spans
 
 
 def _spans_to_bio(
@@ -265,18 +358,29 @@ def load_single_dataset(
     max_seq_len: int = 256,
     max_char_len: int = 20,
     max_examples: int | None = None,
+    override_split: str | None = None,
 ) -> Dataset:
     """Load and preprocess a single PII dataset.
 
-    Handles two formats:
-    - Token-based (AI4Privacy): pre-tokenized tokens + NER tag columns
+    Handles three formats:
+    - Token-based (AI4Privacy, NCBI, MACCROBAT): pre-tokenized tokens + NER tags
     - Span-based (Nemotron, Gretel): raw text + character-offset span annotations
+    - Entity-based (Gretel v1): raw text + entity values/types without offsets
+
+    Args:
+        override_split: If provided, load this specific split instead of config default.
     """
     config = DATASET_CONFIGS[dataset_name]
     data_format = config.get("format", "token")
-    logger.info(f"Loading {dataset_name} from {config['path']} (format={data_format})...")
+    split = override_split or config.get("split", "train")
+    logger.info(f"Loading {dataset_name} from {config['path']} (format={data_format}, split={split})...")
 
-    raw = load_dataset(config["path"], split=config["split"])
+    if data_format == "synthetic":
+        return _load_synthetic_dataset(
+            dataset_name, tokenizer, max_seq_len, max_char_len, max_examples
+        )
+
+    raw = load_dataset(config["path"], split=split, trust_remote_code=True)
 
     # Filter to English using dataset-specific language column/value
     lang_col = config.get("language_col", "language")
@@ -288,7 +392,26 @@ def load_single_dataset(
     if max_examples is not None:
         raw = raw.select(range(min(max_examples, len(raw))))
 
-    if data_format == "span":
+    if data_format == "entity":
+        text_col = config["text_col"]
+        entities_col = config["entities_col"]
+
+        def preprocess_entity(example):
+            spans = _entities_to_spans(example[text_col], example[entities_col])
+            tokens, bio_tags = _spans_to_bio(
+                example[text_col], spans, dataset_name
+            )
+            if not tokens:
+                tokens = ["[EMPTY]"]
+                bio_tags = ["O"]
+            return _tokenize_and_align(tokens, bio_tags, tokenizer, max_seq_len, max_char_len)
+
+        processed = raw.map(
+            preprocess_entity,
+            remove_columns=raw.column_names,
+            desc=f"Processing {dataset_name}",
+        )
+    elif data_format == "span":
         text_col = config["text_col"]
         spans_col = config["spans_col"]
 
@@ -311,12 +434,13 @@ def load_single_dataset(
         token_col, tag_col = _detect_columns(raw)
 
         # Check if tags are ClassLabel integers (need tag_names for conversion).
-        # HF datasets' List type has a broken __getattr__ so we use bare try/except.
-        tag_names = None
-        try:
-            tag_names = raw.features[tag_col].feature.names
-        except Exception:
-            pass
+        # Use explicit config tag_names first, then try HF ClassLabel auto-detection.
+        tag_names = config.get("tag_names")
+        if tag_names is None:
+            try:
+                tag_names = raw.features[tag_col].feature.names
+            except Exception:
+                pass
 
         def preprocess_token(example):
             tokens = example[token_col]
@@ -330,6 +454,50 @@ def load_single_dataset(
             desc=f"Processing {dataset_name}",
         )
 
+    return processed
+
+
+def _load_synthetic_dataset(
+    dataset_name: str,
+    tokenizer: PreTrainedTokenizerFast,
+    max_seq_len: int = 256,
+    max_char_len: int = 20,
+    max_examples: int | None = None,
+) -> Dataset:
+    """Load synthetic data from local JSONL files."""
+    data_dir = _SYNTHETIC_DATA_DIR
+    if not data_dir.exists():
+        raise FileNotFoundError(
+            f"Synthetic data directory not found: {data_dir}. "
+            "Run 'python scripts/generate_synthetic_data.py' first."
+        )
+
+    jsonl_files = sorted(data_dir.glob("*.jsonl"))
+    if not jsonl_files:
+        raise FileNotFoundError(f"No JSONL files found in {data_dir}")
+
+    raw = load_dataset("json", data_files=[str(f) for f in jsonl_files], split="train")
+    logger.info(f"  Loaded {len(raw)} synthetic examples from {len(jsonl_files)} files")
+
+    if max_examples is not None:
+        raw = raw.select(range(min(max_examples, len(raw))))
+
+    def preprocess_synthetic(example):
+        text = example["text"]
+        spans = example["spans"]
+        if isinstance(spans, str):
+            spans = ast.literal_eval(spans)
+        tokens, bio_tags = _spans_to_bio(text, spans, "synthetic")
+        if not tokens:
+            tokens = ["[EMPTY]"]
+            bio_tags = ["O"]
+        return _tokenize_and_align(tokens, bio_tags, tokenizer, max_seq_len, max_char_len)
+
+    processed = raw.map(
+        preprocess_synthetic,
+        remove_columns=raw.column_names,
+        desc=f"Processing {dataset_name}",
+    )
     return processed
 
 
@@ -402,37 +570,65 @@ def load_pii_datasets(
 ) -> DatasetDict:
     """Load all PII datasets, combine, and split into train/val/test.
 
+    Datasets with a "splits" config key (e.g. NCBI) are loaded per-split and
+    injected directly into the corresponding train/val/test partitions.
+    Datasets without "splits" go through a combined random split.
+
     Args:
         oversample_tiers: List of tier numbers to oversample (e.g., [1, 2]).
             None disables oversampling.
         oversample_factor: Number of times to duplicate rare-entity examples.
     """
-    all_datasets = []
-    for name in DATASET_CONFIGS:
+    # Datasets that go through random split
+    unsplit_datasets = []
+    # Pre-split datasets: {split_name: [dataset, ...]}
+    presplit_datasets = {"train": [], "validation": [], "test": []}
+
+    for name, config in DATASET_CONFIGS.items():
         try:
-            ds = load_single_dataset(
-                name, tokenizer, max_seq_len, max_char_len, max_examples_per_dataset
-            )
-            all_datasets.append(ds)
-            logger.info(f"  {name}: {len(ds)} examples")
+            if "splits" in config:
+                # Load each split separately (e.g. NCBI train/val/test)
+                for target_split, source_split in config["splits"].items():
+                    ds = load_single_dataset(
+                        name, tokenizer, max_seq_len, max_char_len,
+                        max_examples_per_dataset, override_split=source_split,
+                    )
+                    presplit_datasets[target_split].append(ds)
+                    logger.info(f"  {name}/{source_split}: {len(ds)} examples -> {target_split}")
+            else:
+                ds = load_single_dataset(
+                    name, tokenizer, max_seq_len, max_char_len, max_examples_per_dataset
+                )
+                unsplit_datasets.append(ds)
+                logger.info(f"  {name}: {len(ds)} examples")
         except Exception as e:
             logger.warning(f"  Failed to load {name}: {e}")
             continue
 
-    if not all_datasets:
+    if not unsplit_datasets and not any(presplit_datasets.values()):
         raise RuntimeError("No datasets loaded successfully")
 
-    combined = concatenate_datasets(all_datasets)
-    logger.info(f"Combined: {len(combined)} examples")
+    # Random split for unsplit datasets
+    if unsplit_datasets:
+        combined = concatenate_datasets(unsplit_datasets)
+        logger.info(f"Combined (unsplit): {len(combined)} examples")
 
-    # Split: train / val / test (BEFORE oversampling to avoid data leakage)
-    test_size = test_ratio
-    val_size = val_ratio / (1 - test_ratio)  # Adjust for two-stage split
+        test_size = test_ratio
+        val_size = val_ratio / (1 - test_ratio)
 
-    split1 = combined.train_test_split(test_size=test_size, seed=seed)
-    split2 = split1["train"].train_test_split(test_size=val_size, seed=seed)
+        split1 = combined.train_test_split(test_size=test_size, seed=seed)
+        split2 = split1["train"].train_test_split(test_size=val_size, seed=seed)
 
-    train_ds = split2["train"]
+        presplit_datasets["train"].append(split2["train"])
+        presplit_datasets["validation"].append(split2["test"])
+        presplit_datasets["test"].append(split1["test"])
+
+    # Merge all partitions
+    train_ds = concatenate_datasets(presplit_datasets["train"]) if presplit_datasets["train"] else Dataset.from_dict({})
+    val_ds = concatenate_datasets(presplit_datasets["validation"]) if presplit_datasets["validation"] else Dataset.from_dict({})
+    test_ds = concatenate_datasets(presplit_datasets["test"]) if presplit_datasets["test"] else Dataset.from_dict({})
+
+    logger.info(f"Final: train={len(train_ds)}, val={len(val_ds)}, test={len(test_ds)}")
 
     # Oversample rare entities in training set only
     if oversample_tiers:
@@ -442,7 +638,7 @@ def load_pii_datasets(
     return DatasetDict(
         {
             "train": train_ds,
-            "validation": split2["test"],
-            "test": split1["test"],
+            "validation": val_ds,
+            "test": test_ds,
         }
     )

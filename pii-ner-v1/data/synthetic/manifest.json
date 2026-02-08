@@ -1,0 +1,28 @@
+{
+  "n_per_type": 2000,
+  "seed": 42,
+  "entity_types": [
+    "NATIONALITY",
+    "RELIGION",
+    "MARITAL_STATUS",
+    "STUDENT_ID",
+    "CRYPTO_WALLET",
+    "INSURANCE_NUMBER",
+    "SALARY",
+    "CRIMINAL_RECORD",
+    "POLITICAL_AFFILIATION",
+    "SEXUAL_ORIENTATION"
+  ],
+  "files": {
+    "NATIONALITY": "nationality.jsonl",
+    "RELIGION": "religion.jsonl",
+    "MARITAL_STATUS": "marital_status.jsonl",
+    "STUDENT_ID": "student_id.jsonl",
+    "CRYPTO_WALLET": "crypto_wallet.jsonl",
+    "INSURANCE_NUMBER": "insurance_number.jsonl",
+    "SALARY": "salary.jsonl",
+    "CRIMINAL_RECORD": "criminal_record.jsonl",
+    "POLITICAL_AFFILIATION": "political_affiliation.jsonl",
+    "SEXUAL_ORIENTATION": "sexual_orientation.jsonl"
+  }
+}

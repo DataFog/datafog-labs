@@ -15,6 +15,9 @@ DATASETS = {
     "AI4Privacy (200K)": "ai4privacy/pii-masking-200k",
     "NVIDIA Nemotron-PII": "nvidia/Nemotron-PII",
     "Gretel Synthetic PII": "gretelai/synthetic_pii_finance_multilingual",
+    "Gretel PII Masking v1": "gretelai/gretel-pii-masking-en-v1",
+    "NCBI Disease": "ncbi/ncbi_disease",
+    "MACCROBAT Biomedical NER": "singh-aditya/MACCROBAT_biomedical_ner",
 }
 
 
