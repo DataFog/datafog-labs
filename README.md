@@ -6,7 +6,7 @@ Open research and development for lightweight PII detection models. This repo co
 
 ## PII-NER v1
 
-A 22.7M parameter model for detecting 44 types of personally identifiable information in English text. Combines a pretrained DeBERTa-v3-xsmall backbone with a character CNN encoder, adaptive gating fusion, and CRF output layer.
+A 22.7M parameter model for detecting 41 types of personally identifiable information in English text. Combines a pretrained DeBERTa-v3-xsmall backbone with a character CNN encoder, adaptive gating fusion, and CRF output layer.
 
 ```
 Input Text
@@ -104,7 +104,7 @@ See [eval_benchmark.md](pii-ner-v1/docs/eval_benchmark.md) for flags and options
 | [NVIDIA Nemotron-PII](https://huggingface.co/datasets/nvidia/Nemotron-PII) | ~100K examples | CC-BY-4.0 |
 | [Gretel Synthetic PII Finance](https://huggingface.co/datasets/gretelai/synthetic_pii_finance_multilingual) | ~56K examples | Apache 2.0 |
 
-Combined: ~169K English examples after filtering and dedup. 44 canonical entity types across 4 sensitivity tiers, unified into 89 BIO labels. The dataset has a 323x frequency imbalance (DATE: 170K occurrences vs PASSPORT: 526), which drives many of the training innovations below.
+Combined: ~169K English examples after filtering and dedup. 41 canonical entity types across 4 sensitivity tiers, unified into 83 BIO labels. The dataset has a 323x frequency imbalance (DATE: 170K occurrences vs PASSPORT: 526), which drives many of the training innovations below.
 
 ## Documentation
 
@@ -149,7 +149,7 @@ Key finding: no published work combines differentiable character-level pattern r
 ## Open problems
 
 - **Tier 1 recall gap**: 0.823 vs 0.98 target. Passport number (0.426 F1) has only 526 training examples.
-- **16 zero-occurrence entity types**: NATIONALITY, ETHNICITY, RELIGION, etc. exist in the taxonomy but no training data covers them.
+- **13 zero-occurrence entity types**: NATIONALITY, RELIGION, MARITAL_STATUS, etc. exist in the taxonomy but no training data covers them.
 - **Head instability**: Root cause of the epoch 3+ training spike is unknown. Gradient clipping, per-component LR decay, or early stopping are candidate fixes.
 - **ONNX export**: CRF Viterbi decode doesn't export cleanly; needs pure-PyTorch reimplementation.
 
