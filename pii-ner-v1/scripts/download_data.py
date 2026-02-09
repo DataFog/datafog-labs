@@ -25,7 +25,7 @@ def main():
     for name, path in DATASETS.items():
         logger.info(f"Downloading {name} from {path}...")
         try:
-            ds = load_dataset(path, split="train", trust_remote_code=True)
+            ds = load_dataset(path, split="train", trust_remote_code=False)
             logger.info(f"  {name}: {len(ds)} examples, columns: {ds.column_names}")
         except Exception as e:
             logger.error(f"  Failed to download {name}: {e}")

@@ -150,7 +150,7 @@ def _load_and_count(name, config):
         all_ex_counts = Counter()
         total_n = 0
         for target_split, source_split in config["splits"].items():
-            raw = load_dataset(config["path"], split=source_split, trust_remote_code=True)
+            raw = load_dataset(config["path"], split=source_split, trust_remote_code=False)
             print(f"  Split {source_split}: {len(raw)} examples")
             counts, ex_counts, n = count_entities_token_format(raw, name)
             all_counts += counts
@@ -158,7 +158,7 @@ def _load_and_count(name, config):
             total_n += n
         return all_counts, all_ex_counts, total_n
 
-    raw = load_dataset(config["path"], split=config.get("split", "train"), trust_remote_code=True)
+    raw = load_dataset(config["path"], split=config.get("split", "train"), trust_remote_code=False)
 
     # Filter to English
     lang_col = config.get("language_col", "language")

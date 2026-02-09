@@ -380,7 +380,7 @@ def load_single_dataset(
             dataset_name, tokenizer, max_seq_len, max_char_len, max_examples
         )
 
-    raw = load_dataset(config["path"], split=split, trust_remote_code=True)
+    raw = load_dataset(config["path"], split=split, trust_remote_code=False)
 
     # Filter to English using dataset-specific language column/value
     lang_col = config.get("language_col", "language")

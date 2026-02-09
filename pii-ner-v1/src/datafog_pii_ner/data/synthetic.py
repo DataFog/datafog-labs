@@ -70,6 +70,35 @@ SEXUAL_ORIENTATIONS = [
     "asexual", "queer", "demisexual", "questioning",
 ]
 
+HEALTH_CONDITIONS = [
+    "diabetes", "hypertension", "asthma", "depression", "anxiety disorder",
+    "bipolar disorder", "schizophrenia", "PTSD", "ADHD", "autism",
+    "Alzheimer's disease", "Parkinson's disease", "multiple sclerosis",
+    "epilepsy", "migraine", "chronic fatigue syndrome", "fibromyalgia",
+    "rheumatoid arthritis", "osteoarthritis", "lupus",
+    "Crohn's disease", "ulcerative colitis", "celiac disease",
+    "Type 1 diabetes", "Type 2 diabetes", "gestational diabetes",
+    "coronary artery disease", "heart failure", "atrial fibrillation",
+    "chronic kidney disease", "liver cirrhosis", "hepatitis B",
+    "hepatitis C", "HIV", "tuberculosis", "pneumonia",
+    "breast cancer", "lung cancer", "prostate cancer", "leukemia",
+    "lymphoma", "melanoma", "colon cancer", "pancreatic cancer",
+    "ovarian cancer", "thyroid cancer", "bladder cancer",
+    "sickle cell disease", "cystic fibrosis", "Down syndrome",
+    "hemophilia", "muscular dystrophy", "spina bifida",
+    "sleep apnea", "insomnia", "eating disorder", "OCD",
+    "substance use disorder", "alcoholism", "opioid addiction",
+    "chronic pain syndrome", "irritable bowel syndrome",
+    "endometriosis", "polycystic ovary syndrome", "infertility",
+    "glaucoma", "macular degeneration", "cataracts",
+    "hearing loss", "tinnitus", "vertigo",
+    "eczema", "psoriasis", "dermatitis", "rosacea",
+    "osteoporosis", "gout", "anemia", "thyroid disorder",
+    "Graves' disease", "Hashimoto's thyroiditis",
+    "stroke", "traumatic brain injury", "concussion",
+    "carpal tunnel syndrome", "sciatica", "herniated disc",
+]
+
 CRIMINAL_RECORD_PHRASES = [
     "felony conviction 2019", "misdemeanor assault 2020",
     "DUI charge 2018", "theft conviction 2017",
@@ -91,6 +120,33 @@ CRIMINAL_RECORD_PHRASES = [
 # --- Templates per entity type (20-30 each) ---
 
 TEMPLATES = {
+    "HEALTH_CONDITION": [
+        "The patient was diagnosed with {value}.",
+        "Medical history: {value}.",
+        "Primary diagnosis: {value}.",
+        "The individual has been treated for {value}.",
+        "Chart notes indicate {value}.",
+        "The patient presents with {value}.",
+        "Condition: {value}.",
+        "The member was referred for {value} treatment.",
+        "Ongoing management of {value}.",
+        "The claimant reports {value}.",
+        "Family history of {value}.",
+        "Screening positive for {value}.",
+        "The employee disclosed {value}.",
+        "Insurance claim for {value}.",
+        "The resident has a history of {value}.",
+        "Differential diagnosis includes {value}.",
+        "Treatment plan for {value} initiated.",
+        "The child was diagnosed with {value} at age five.",
+        "Chronic condition: {value}.",
+        "Lab results consistent with {value}.",
+        "The patient is managing {value} with medication.",
+        "Hospitalized for {value}.",
+        "Discharge diagnosis: {value}.",
+        "Follow-up visit for {value}.",
+        "The applicant disclosed a diagnosis of {value}.",
+    ],
     "NATIONALITY": [
         "The applicant is {value} by nationality.",
         "Patient identified as {value}.",
@@ -403,6 +459,7 @@ def _generate_salary(rng: random.Random) -> str:
 
 
 VALUE_GENERATORS = {
+    "HEALTH_CONDITION": lambda rng: rng.choice(HEALTH_CONDITIONS),
     "NATIONALITY": lambda rng: rng.choice(NATIONALITIES),
     "RELIGION": lambda rng: rng.choice(RELIGIONS),
     "MARITAL_STATUS": lambda rng: rng.choice(MARITAL_STATUSES),

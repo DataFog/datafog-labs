@@ -2,6 +2,7 @@
   "n_per_type": 2000,
   "seed": 42,
   "entity_types": [
+    "HEALTH_CONDITION",
     "NATIONALITY",
     "RELIGION",
     "MARITAL_STATUS",
@@ -14,6 +15,7 @@
     "SEXUAL_ORIENTATION"
   ],
   "files": {
+    "HEALTH_CONDITION": "health_condition.jsonl",
     "NATIONALITY": "nationality.jsonl",
     "RELIGION": "religion.jsonl",
     "MARITAL_STATUS": "marital_status.jsonl",
